@@ -2,6 +2,9 @@ FROM python:3.9-slim
 
 WORKDIR /app
 
+# Keep Python output unbuffered (helps with logs)
+ENV PYTHONUNBUFFERED=1
+
 # Copy requirements first for better caching
 COPY requirements.txt .
 
