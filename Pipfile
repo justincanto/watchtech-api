@@ -23,6 +23,7 @@ httpx = "*"
 feedparser = "*"
 beautifulsoup4 = "*"
 flower = "*"
+youtube-transcript-api = "*"
 
 [dev-packages]
 
