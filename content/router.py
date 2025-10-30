@@ -23,3 +23,15 @@ def get_contents(
     current_user: models.User = Depends(get_current_user),
 ):
     return service.get_contents(db, current_user.id, limit, offset)
+
+
+@router.get("/{content_id}", response_model=schemas.Content)
+def get_content_by_id(
+    content_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    content = service.get_user_content_by_id(db, content_id, current_user.id)
+    if not content:
+        raise HTTPException(status_code=404, detail="Content not found")
+    return content
