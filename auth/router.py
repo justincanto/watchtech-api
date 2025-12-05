@@ -35,11 +35,10 @@ async def get_current_user(
 async def logout(
     response: Response,
     db: Session = Depends(get_db),
-    user_session: tuple = Depends(service.get_current_user_session)
+    current_user: schemas.User = Depends(service.get_current_user)
 ):
     """Logout the current user"""
-    _, session = user_session
-    service.logout(db, session, response)
+    service.logout(db, current_user.session, response)
     
     return {"detail": "Successfully logged out"}
 
