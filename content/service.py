@@ -54,6 +54,7 @@ def retrieve_content(db: Session, url: str, source_type: models.SourceType) -> m
 
     db_content = models.Content(
         title=content_data["title"],
+        transcript=content_data["content"],
         summary=summary,
         url=url,
         source_id=content_source.id,

@@ -5,6 +5,17 @@ from yt_dlp import YoutubeDL
 from datetime import datetime
 import feedparser
 from typing import List
+import os
+
+RESIDENTIAL_PROXY = os.getenv("RESIDENTIAL_PROXY")
+if not RESIDENTIAL_PROXY:
+    raise Exception("RESIDENTIAL_PROXY is not set")
+
+def get_proxy():
+    return {
+        "http": RESIDENTIAL_PROXY,
+        "https": RESIDENTIAL_PROXY
+    }
 
 ENGLISH_LANGUAGE_CODE = "en"
 
@@ -23,6 +34,8 @@ def scrap_video(url):
         'no_warnings': True,
         'subtitlesformat': 'json3'
     }
+
+    ydl_opts["proxy"] = RESIDENTIAL_PROXY
     
     with YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=False)
@@ -61,7 +74,7 @@ def scrap_video(url):
     if not caption_url:
         raise Exception("No subtitles or automatic captions available for this video.")
 
-    response = requests.get(caption_url)
+    response = requests.get(caption_url, proxies=get_proxy())
     if response.status_code != 200:
         raise Exception("Failed to download the subtitles.")
 
@@ -128,18 +141,28 @@ def get_youtube_channel_videos(channel_url: str, limit: int = 5) -> List[str]:
     # We'll use the YouTube RSS feed to get recent videos
     feed_url = f"https://www.youtube.com/feeds/videos.xml?channel_id={channel_data['id']}"
     try:
-        response = requests.get(feed_url)
+        response = requests.get(feed_url, proxies=get_proxy())
         response.raise_for_status()
         
         feed = feedparser.parse(response.content)
         
         # Extract video URLs from the feed
         video_urls = []
-        for entry in feed.entries[:limit]:
-            video_id = entry.yt_videoid
-            video_url = f"https://www.youtube.com/watch?v={video_id}"
-            video_urls.append(video_url)
-            
+        count = 0
+        while count < limit and count < len(feed.entries):
+            entry = feed.entries[count]
+            link_href = ""
+            if hasattr(entry, "links"):
+                for l in entry.links:
+                    if l.get("rel") == "alternate" and l.get("href"):
+                        link_href = l.get("href")
+                        break
+            if "youtube.com/shorts/" in link_href:
+                continue
+
+            video_urls.append(link_href)
+            count += 1
+
         return video_urls
     except Exception as e:
         print(f"Error retrieving YouTube videos: {e}")
