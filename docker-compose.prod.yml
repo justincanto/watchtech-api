@@ -1,61 +1,42 @@
-version: "3.9"
+version: "3.12"
 
 networks:
-  web:
+  internal:
     driver: bridge
+  traefik_public:
+    external: true
 
 services:
-  traefik:
-    image: traefik:v2.10
-    container_name: traefik
-    command:
-      - --entryPoints.web.address=:80
-      - --entryPoints.websecure.address=:443
-      - --providers.docker=true
-      - --providers.docker.exposedbydefault=false
-      - --certificatesresolvers.le.acme.tlschallenge=true
-      - --certificatesresolvers.le.acme.email=justin.canto@proton.me
-      - --certificatesresolvers.le.acme.storage=/letsencrypt/acme.json
-      - --api.insecure=false
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - ./traefik/acme.json:/letsencrypt/acme.json
-    networks:
-      - web
-    restart: unless-stopped
-
   api:
     build: .
     container_name: watchtech-backend
-    # NOTE: we do NOT publish the internal container port to the host; Traefik will route traffic.
-    # If you want local port exposure for debugging, you can add "8000:8000" under ports (not recommended in prod).
     env_file:
       - ./.env
     environment:
       - MISTRAL_API_KEY=${MISTRAL_API_KEY}
       - DATABASE_URL=postgresql://postgres:postgres@db:5432/watchtech
     volumes:
-      - .:/app # ok for dev. Remove for immutable production images.
+      - .:/app
     depends_on:
       - db
     restart: unless-stopped
     networks:
-      - web
+      - internal
+      - traefik_public
     labels:
       - "traefik.enable=true"
-      # HTTPS router
-      - "traefik.http.routers.watchtech.rule=Host(`api.watchtech.trckfnds.ovh`)"
+      # Routing
+      - "traefik.http.routers.watchtech.rule=Host(`api.watchtech.io`)"
       - "traefik.http.routers.watchtech.entrypoints=websecure"
       - "traefik.http.routers.watchtech.tls.certresolver=le"
       - "traefik.http.services.watchtech.loadbalancer.server.port=8000"
-      # HTTP -> HTTPS redirect
-      - "traefik.http.routers.watchtech-http.rule=Host(`api.watchtech.trckfnds.ovh`)"
+      # Redirect HTTP -> HTTPS
+      - "traefik.http.routers.watchtech-http.rule=Host(`api.watchtech.io`)"
       - "traefik.http.routers.watchtech-http.entrypoints=web"
       - "traefik.http.routers.watchtech-http.middlewares=redirect-to-https"
       - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
+      # CRITICAL: Tell Traefik which network to use
+      - "traefik.docker.network=traefik_public"
 
   db:
     image: postgres:16-alpine
@@ -64,13 +45,10 @@ services:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
       - POSTGRES_DB=watchtech
-    # For security in production: remove the published port below so Postgres is only reachable from the Docker network.
-    # ports:
-    #   - "5432:5432"
     volumes:
       - watchtech_postgres_data:/var/lib/postgresql/data
     networks:
-      - web
+      - internal
     restart: unless-stopped
 
 volumes:
