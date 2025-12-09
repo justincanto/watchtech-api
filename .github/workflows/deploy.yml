@@ -1,0 +1,41 @@
+name: Deploy API
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to Cloud VM
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VM_HOST }}
+          username: ${{ secrets.VM_USERNAME }}
+          key: ${{ secrets.VM_SSH_KEY }}
+          # port: 22 # Default is 22, uncomment if different
+          script: |
+            # Navigate to the project directory
+            # NOTE: Ensure this path matches where you cloned the repo on your server
+            cd ~/watchtech/api || exit 1
+
+            # Pull the latest changes
+            echo "Pulling latest code..."
+            git fetch origin main
+            git reset --hard origin/main
+
+            # Set environment variables from the secret
+            echo "Setting environment variables..."
+            cat <<EOF > .env
+            ${{ secrets.PROD_ENV_FILE }}
+            EOF
+
+            # Rebuild and restart the API service
+            echo "Rebuilding and restarting API service..."
+            docker compose -f docker-compose.prod.yml up -d --build
+
+            # Prune unused docker objects to save space
+            echo "Cleaning up..."
+            docker image prune -f
