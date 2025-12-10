@@ -13,12 +13,15 @@ services:
     env_file:
       - ./.env
     environment:
-      - MISTRAL_API_KEY=${MISTRAL_API_KEY}
       - DATABASE_URL=postgresql://postgres:postgres@db:5432/watchtech
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672//
     volumes:
       - .:/app
     depends_on:
-      - db
+      rabbitmq:
+        condition: service_healthy
+      db:
+        condition: service_started
     restart: unless-stopped
     networks:
       - internal
@@ -38,6 +41,65 @@ services:
       # CRITICAL: Tell Traefik which network to use
       - "traefik.docker.network=traefik_public"
 
+  # Celery worker for content processing tasks
+  celery-worker:
+    build: .
+    container_name: watchtech-celery-worker
+    command: celery -A celery_app.celery_app worker --loglevel=info --concurrency=2 -Q default,content
+    env_file:
+      - ./.env
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/watchtech
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672//
+    volumes:
+      - .:/app
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      db:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - internal
+
+  # Celery beat scheduler for periodic tasks (optional, for future use)
+  celery-beat:
+    build: .
+    container_name: watchtech-celery-beat
+    command: celery -A celery_app.celery_app beat --loglevel=info
+    env_file:
+      - ./.env
+    environment:
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672//
+    volumes:
+      - .:/app
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - internal
+
+  # RabbitMQ message broker
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: watchtech-rabbitmq
+    environment:
+      - RABBITMQ_DEFAULT_USER=guest
+      - RABBITMQ_DEFAULT_PASS=guest
+    volumes:
+      - watchtech_rabbitmq_data:/var/lib/rabbitmq
+    ports:
+      - "15672:15672" # Management UI (internal only, remove in production if not needed)
+    networks:
+      - internal
+    restart: unless-stopped
+    healthcheck:
+      test: rabbitmq-diagnostics -q ping
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
   db:
     image: postgres:16-alpine
     container_name: watchtech-database
@@ -53,3 +115,4 @@ services:
 
 volumes:
   watchtech_postgres_data:
+  watchtech_rabbitmq_data:

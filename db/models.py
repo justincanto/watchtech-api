@@ -1,5 +1,5 @@
 import uuid
-from sqlalchemy import Column, String, DateTime, Text, ForeignKey, Enum, Boolean, UniqueConstraint, Index
+from sqlalchemy import Enum, String, DateTime, Text, ForeignKey, Boolean, UniqueConstraint, Index
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship, mapped_column, Mapped
 from sqlalchemy.sql import func
@@ -14,6 +14,15 @@ class SourceType(enum.Enum):
     YOUTUBE = "youtube"
     MEDIUM = "medium"
     DEV_TO = "dev_to"
+
+
+class ContentStatus(enum.Enum):
+    """Status of content processing in the task queue."""
+    PENDING = "pending"      # Task queued, not started
+    EXTRACTING = "extracting"  # Extracting data from source
+    SUMMARIZING = "summarizing"  # Generating AI summary
+    COMPLETED = "completed"  # Processing finished successfully
+    FAILED = "failed"        # Processing failed
 
 
 class User(Base):
@@ -78,15 +87,28 @@ class Content(Base):
     transcript: Mapped[str] = mapped_column(Text, nullable=True)
     mindmap: Mapped[str] = mapped_column(Text, nullable=True)
     description: Mapped[str] = mapped_column(Text, nullable=True)
-    published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     url: Mapped[str] = mapped_column(String(2048), nullable=False, unique=True)
+    
+    # Task queue status fields
+    status: Mapped[ContentStatus] = mapped_column(
+        Enum(ContentStatus, name='contentstatus', create_type=True), 
+        nullable=False, 
+        default=ContentStatus.PENDING,
+    )
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    task_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)  # Celery task ID
     
     # Foreign keys
     source_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("sources.id"), nullable=False)
     
     # Relationships
     source: Mapped[Source] = relationship("Source", back_populates="contents")
+    
+    __table_args__ = (
+        Index('idx_content_status', 'status'),
+    )
 
 class UserSource(Base):
     __tablename__ = "user_sources"

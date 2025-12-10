@@ -1,8 +1,6 @@
-langchain-mistralai
-langchain-xai
+langchain_openai
 yt-dlp
 requests
-langgraph
 fastapi==0.115.12
 uvicorn==0.34.2
 pydantic
@@ -19,7 +17,5 @@ authlib
 httpx
 feedparser
 beautifulsoup4
-celery
-flower
+celery[rabbitmq]==5.4.0
 apscheduler
-youtube-transcript-api

@@ -1,7 +1,4 @@
 import os
-import uuid
-import hashlib
-import hmac
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -9,6 +6,7 @@ from typing import Optional
 import requests
 from sqlalchemy.orm import Session
 
+from source.service import content_service
 from db import models
 
 
@@ -130,6 +128,12 @@ def handle_verification_challenge(
 
 
 def process_youtube_webhook(db: Session, body: bytes) -> None:
+    """
+    Process YouTube PubSubHubbub webhook notification.
+    
+    New video notifications are queued for background processing via Celery
+    for better scalability and reliability.
+    """
     parsed = feedparser.parse(body)
     for entry in parsed.entries:
         video_id = getattr(entry, "yt_videoid", None)
@@ -146,7 +150,9 @@ def process_youtube_webhook(db: Session, body: bytes) -> None:
             continue
 
         try:
-            content_service.retrieve_content_for_source(db, source, video_url)
+            content_service.retrieve_content_for_source(
+                db, source, video_url
+            )
         except Exception as e:
-            print(f"Error retrieving content {video_url} for source {source.id}: {e}")
+            print(f"Error queueing content {video_url} for source {source.id}: {e}")
             continue

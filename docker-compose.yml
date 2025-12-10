@@ -1,5 +1,9 @@
 version: "3.9"
 
+networks:
+  watchtech:
+    driver: bridge
+
 services:
   api:
     build: .
@@ -9,13 +13,60 @@ services:
     env_file:
       - ./.env
     environment:
-      - MISTRAL_API_KEY=${MISTRAL_API_KEY}
       - DATABASE_URL=postgresql://postgres:postgres@db:5432/watchtech
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672//
     volumes:
       - .:/app
     depends_on:
-      - db
+      rabbitmq:
+        condition: service_healthy
+      db:
+        condition: service_started
     restart: unless-stopped
+    networks:
+      - watchtech
+
+  # Celery worker for content processing tasks
+  celery-worker:
+    build: .
+    container_name: watchtech-celery-worker
+    command: celery -A celery_app.celery_app worker --loglevel=info --concurrency=2 -Q default,content
+    env_file:
+      - ./.env
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/watchtech
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672//
+    volumes:
+      - .:/app
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      db:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - watchtech
+
+  # RabbitMQ message broker
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: watchtech-rabbitmq
+    environment:
+      - RABBITMQ_DEFAULT_USER=guest
+      - RABBITMQ_DEFAULT_PASS=guest
+    volumes:
+      - watchtech_rabbitmq_data:/var/lib/rabbitmq
+    ports:
+      - "5672:5672" # AMQP port
+      - "15672:15672" # Management UI
+    restart: unless-stopped
+    healthcheck:
+      test: rabbitmq-diagnostics -q ping
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - watchtech
 
   db:
     image: postgres:16-alpine
@@ -29,6 +80,9 @@ services:
     volumes:
       - watchtech_postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
+    networks:
+      - watchtech
 
 volumes:
   watchtech_postgres_data:
+  watchtech_rabbitmq_data:

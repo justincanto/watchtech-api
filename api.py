@@ -1,3 +1,4 @@
+from celery_app import celery_app
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
@@ -63,7 +64,6 @@ app.include_router(content_router, prefix="/api/content", tags=["content"])
 app.include_router(source_router, prefix="/api/source", tags=["source"])
 app.include_router(subscriptions_router, prefix="/api/webhooks", tags=["webhooks"])
 app.include_router(transcript_router, prefix="/api/transcript", tags=["transcript"])
-
 
 @app.get("/health")
 async def health_check():

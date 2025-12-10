@@ -65,16 +65,36 @@ def get_or_create_source(db: Session, type: models.SourceType, url: str) -> Tupl
     return new_source
 
 
-def ingest_source_latest_contents(db: Session, source: models.Source, limit: int = 1) -> List[models.Content]:
-    """Ingest the latest contents from a source"""
+def ingest_source_latest_contents(
+    db: Session, 
+    source: models.Source, 
+    limit: int = 1,
+) -> List[models.Content]:
+    """
+    Ingest the latest contents from a source.
+    
+    Args:
+        db: Database session
+        source: The source to ingest content from
+        limit: Maximum number of contents to ingest
+        
+    Returns:
+        List of Content models (may be in PENDING status if async_mode=True)
+    """
+    contents = []
     try:
         content_urls = SOURCE_TYPE_URL_EXTRACTORS[source.type](source.url, limit)
         for url in content_urls:
-            content_service.retrieve_content(db, url, source.type)
+            content = content_service.retrieve_content_for_source(
+                db, source, url
+            )
+            contents.append(content)
             
     except Exception as e:
         print(f"Error processing content from source {source.id}: {str(e)}")
-        return []
+        return contents
+    
+    return contents
 
 def get_source(db: Session, source_id: uuid.UUID, limit_contents: int = 12) -> Optional[models.Source]:
     """
