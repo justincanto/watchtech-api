@@ -15,10 +15,13 @@ services:
     environment:
       - DATABASE_URL=postgresql://postgres:postgres@db:5432/watchtech
       - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672//
+      - REDIS_URL=redis://redis:6379/0
     volumes:
       - .:/app
     depends_on:
       rabbitmq:
+        condition: service_healthy
+      redis:
         condition: service_healthy
       db:
         condition: service_started
@@ -30,16 +33,19 @@ services:
   celery-worker:
     build: .
     container_name: watchtech-celery-worker
-    command: celery -A celery_app.celery_app worker --loglevel=info --concurrency=2 -Q default,content
+    command: celery -A celery_app.celery_app worker --loglevel=info --concurrency=2 -Q default,content,source
     env_file:
       - ./.env
     environment:
       - DATABASE_URL=postgresql://postgres:postgres@db:5432/watchtech
       - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672//
+      - REDIS_URL=redis://redis:6379/0
     volumes:
       - .:/app
     depends_on:
       rabbitmq:
+        condition: service_healthy
+      redis:
         condition: service_healthy
       db:
         condition: service_started
@@ -83,6 +89,24 @@ services:
     networks:
       - watchtech
 
+  # Redis for pub/sub and batch storage
+  redis:
+    image: redis:7-alpine
+    container_name: watchtech-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - watchtech_redis_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - watchtech
+
 volumes:
   watchtech_postgres_data:
   watchtech_rabbitmq_data:
+  watchtech_redis_data:

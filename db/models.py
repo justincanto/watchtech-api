@@ -16,6 +16,15 @@ class SourceType(enum.Enum):
     DEV_TO = "dev_to"
 
 
+class SourceStatus(enum.Enum):
+    """Status of source processing in the task queue."""
+    PENDING = "pending"              # Source created, task not started
+    FETCHING_AUTHOR = "fetching_author"  # Fetching author/channel data
+    INGESTING_CONTENT = "ingesting_content"  # Ingesting initial content
+    COMPLETED = "completed"          # Processing finished successfully
+    FAILED = "failed"                # Processing failed
+
+
 class ContentStatus(enum.Enum):
     """Status of content processing in the task queue."""
     PENDING = "pending"      # Task queued, not started
@@ -65,12 +74,21 @@ class Source(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     type: Mapped[SourceType] = mapped_column(Enum(SourceType), nullable=False)
-    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)  # Nullable until fetched
     url: Mapped[str] = mapped_column(String(2048), nullable=False, unique=True)
-    original_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    original_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)  # Nullable until fetched
+    
+    # Task queue status fields
+    status: Mapped[SourceStatus] = mapped_column(
+        Enum(SourceStatus, name='sourcestatus', create_type=True),
+        nullable=False,
+        default=SourceStatus.COMPLETED,  # Default to COMPLETED for existing sources
+    )
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     __table_args__ = (
         UniqueConstraint('type', 'original_id', name='uix_source_type_original_id'),
+        Index('idx_source_status', 'status'),
     )
 
     # Relationships

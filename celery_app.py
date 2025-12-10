@@ -12,7 +12,7 @@ celery_app = Celery(
     "watchtech",
     broker=RABBITMQ_URL,
     backend="rpc://",  # Use RPC for result backend (stores in RabbitMQ)
-    include=["tasks.content"],
+    include=["tasks.content", "tasks.source"],
 )
 
 # Celery configuration
@@ -41,6 +41,7 @@ celery_app.conf.update(
     # Queue configuration
     task_routes={
         "tasks.content.process_content_task": {"queue": "content"},
+        "tasks.source.process_source_task": {"queue": "source"},
     },
     
     # Default queue

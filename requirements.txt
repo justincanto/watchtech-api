@@ -19,3 +19,5 @@ feedparser
 beautifulsoup4
 celery[rabbitmq]==5.4.0
 apscheduler
+redis[hiredis]
+sse-starlette

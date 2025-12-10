@@ -3,10 +3,11 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+import feedparser
 import requests
 from sqlalchemy.orm import Session
 
-from source.service import content_service
+from content import service as content_service
 from db import models
 
 

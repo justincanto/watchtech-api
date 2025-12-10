@@ -1,100 +1,44 @@
 from sqlalchemy.orm import Session
-from sqlalchemy import func
 from db import models
-from typing import Optional, Dict, Callable, Any, Tuple, List
-from extractors.youtube import get_channel_data, get_youtube_channel_videos
-from extractors.medium import get_author_data, get_medium_author_articles
-from extractors.dev_to import get_author_data as get_dev_to_author_data, get_dev_to_author_articles
+from typing import Optional, Tuple, List
 import uuid
 from fastapi import HTTPException
-from content import service as content_service
-from subscriptions.youtube import subscribe_channel, unsubscribe_channel
-
-# Mapping from source type to extractor function
-SOURCE_TYPE_AUTHOR_DATA_EXTRACTORS: Dict[models.SourceType, Callable[[str], Dict[str, Any]]] = {
-    models.SourceType.YOUTUBE: get_channel_data, 
-    models.SourceType.MEDIUM: get_author_data,
-    models.SourceType.DEV_TO: get_dev_to_author_data,
-}
-
-SOURCE_TYPE_URL_EXTRACTORS: Dict[models.SourceType, Callable[[str, int], List[str]]] = {
-    models.SourceType.YOUTUBE: get_youtube_channel_videos,
-    models.SourceType.MEDIUM: get_medium_author_articles,
-    models.SourceType.DEV_TO: get_dev_to_author_articles,
-}
+from subscriptions.youtube import unsubscribe_channel
+from utils.redis_client import store_batch_sources_sync
 
 
-def get_or_create_source(db: Session, type: models.SourceType, url: str) -> Tuple[models.Source, bool]:
+
+def get_or_create_source(db: Session, type: models.SourceType, url: str) -> models.Source:
     """
-    Create a new source with the given type and URL.
-    If a source with the same type and URL already exists, return it instead.
+    Get or create a source with the given type and URL.
+    
+    If a source with the same URL already exists, return it.
+    Otherwise, create a new source in PENDING status (to be processed by Celery task).
+    
+    Returns:
+        The source (existing or newly created)
     """
     existing_source = db.query(models.Source).filter(
-        models.Source.type == type,
         models.Source.url == url
     ).first()
     
     if existing_source:
         return existing_source
     
-    extractor_func = SOURCE_TYPE_AUTHOR_DATA_EXTRACTORS[type]
-    data = extractor_func(url)
-    name = data["name"]
-    original_id = data["id"]
-    
+    # Create source in PENDING status - actual data will be fetched by task
     new_source = models.Source(
         type=type,
         url=url,
-        name=name,
-        original_id=original_id
+        name=None,  # Will be set by task
+        original_id=None,  # Will be set by task
+        status=models.SourceStatus.PENDING,
     )
 
     db.add(new_source)
     db.commit()
-
-    if new_source.type == models.SourceType.YOUTUBE:
-        try:
-            subscribe_channel(db, new_source)
-        except Exception as e:
-            print(f"Failed to subscribe to YouTube PubSub for source {new_source.id}: {e}")
-
-    ingest_source_latest_contents(db, new_source)
-
     db.refresh(new_source)
 
     return new_source
-
-
-def ingest_source_latest_contents(
-    db: Session, 
-    source: models.Source, 
-    limit: int = 1,
-) -> List[models.Content]:
-    """
-    Ingest the latest contents from a source.
-    
-    Args:
-        db: Database session
-        source: The source to ingest content from
-        limit: Maximum number of contents to ingest
-        
-    Returns:
-        List of Content models (may be in PENDING status if async_mode=True)
-    """
-    contents = []
-    try:
-        content_urls = SOURCE_TYPE_URL_EXTRACTORS[source.type](source.url, limit)
-        for url in content_urls:
-            content = content_service.retrieve_content_for_source(
-                db, source, url
-            )
-            contents.append(content)
-            
-    except Exception as e:
-        print(f"Error processing content from source {source.id}: {str(e)}")
-        return contents
-    
-    return contents
 
 def get_source(db: Session, source_id: uuid.UUID, limit_contents: int = 12) -> Optional[models.Source]:
     """
@@ -128,9 +72,19 @@ def get_user_sources(db: Session, user_id: uuid.UUID) -> List[models.Source]:
      
     return sources
 
-def update_user_sources(db: Session, user_id: uuid.UUID, sources_data: List[dict]) -> List[models.Source]:
-    """Update the sources for a user"""
+def update_user_sources(db: Session, user_id: uuid.UUID, sources_data: List[dict]) -> Tuple[str, List[models.Source]]:
+    """
+    Update the sources for a user with async processing.
+    
+    Returns:
+        Tuple of (batch_id, sources list)
+        - batch_id: Can be used to track progress via SSE endpoint
+        - sources: List of source models (some may be in PENDING status)
+    """
     try:
+        # Generate batch ID for progress tracking
+        batch_id = str(uuid.uuid4())
+        
         existing_user_sources = db.query(models.UserSource).filter(
             models.UserSource.user_id == user_id
         ).all()
@@ -138,6 +92,8 @@ def update_user_sources(db: Session, user_id: uuid.UUID, sources_data: List[dict
         existing_source_ids = {us.source_id for us in existing_user_sources}
         
         new_source_ids = set()
+        sources_to_process = []  # Sources that need task dispatch
+        all_batch_source_ids = []  # All sources in this batch for progress tracking
         
         for source_data in sources_data:    
             source = get_or_create_source(
@@ -147,6 +103,7 @@ def update_user_sources(db: Session, user_id: uuid.UUID, sources_data: List[dict
             )
             
             new_source_ids.add(source.id)
+            all_batch_source_ids.append(str(source.id))
 
             if source.id not in existing_source_ids:
                 user_source = models.UserSource(
@@ -154,6 +111,10 @@ def update_user_sources(db: Session, user_id: uuid.UUID, sources_data: List[dict
                     source_id=source.id 
                 )
                 db.add(user_source)
+            
+            # Check if source needs processing (PENDING or FAILED)
+            if source.status in [models.SourceStatus.PENDING, models.SourceStatus.FAILED]:
+                sources_to_process.append(source)
         
         sources_to_remove = existing_source_ids - new_source_ids
         if sources_to_remove:
@@ -162,13 +123,22 @@ def update_user_sources(db: Session, user_id: uuid.UUID, sources_data: List[dict
                 models.UserSource.source_id.in_(sources_to_remove)
             ).delete(synchronize_session=False)
         
-        updated_sources = get_user_sources(db=db, user_id=user_id)
-
         db.commit()
+        
+        # Store batch -> source_ids mapping in Redis for SSE endpoint
+        store_batch_sources_sync(batch_id, all_batch_source_ids)
+        
+        # Dispatch tasks for sources that need processing
+        # Import here to avoid circular dependency with tasks.source
+        from tasks.source import process_source_task
+        for source in sources_to_process:
+            process_source_task.delay(source_id=str(source.id))
+        
+        updated_sources = get_user_sources(db=db, user_id=user_id)
         
         clean_up_orphan_subscriptions(db)
 
-        return updated_sources
+        return batch_id, updated_sources
     
     except Exception as e: 
         print(f"Error updating user sources: {str(e)}")
