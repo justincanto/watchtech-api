@@ -9,6 +9,7 @@ from extractors.youtube import scrap_video
 from extractors.medium import scrap_article
 from extractors.dev_to import scrap_article as scrap_dev_to_article
 from agents.summarizer import summarize_content
+from utils.redis_client import increment_source_content_processed, publish_source_progress
 
 logger = get_task_logger(__name__)
 
@@ -126,6 +127,30 @@ def process_content_task(
             db.commit()
             raise
         
+        tracking = increment_source_content_processed(source_id)
+        
+        if tracking and (tracking["content_processed"] >= tracking["content_total"]):
+            source = db.query(models.Source).filter(
+                models.Source.id == uuid.UUID(source_id)
+            ).first()
+            
+            if source and source.status == models.SourceStatus.INGESTING_CONTENT:
+                source.status = models.SourceStatus.COMPLETED
+                source.error_message = None
+                db.commit()
+                
+                publish_source_progress(
+                    source_id=source_id,
+                    status=models.SourceStatus.COMPLETED.value,
+                    progress=1.0,
+                    message="Source processing completed",
+                    source_url=tracking["source_url"],
+                    source_name=tracking["source_name"],
+                    content_total=tracking["content_total"],
+                    content_processed=tracking["content_processed"],
+                )
+                logger.info(f"Source {source_id} marked as completed after all content processed")
+    
         return str(content_id)
         
     except Exception as e:

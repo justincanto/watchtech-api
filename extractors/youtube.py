@@ -79,15 +79,7 @@ def scrap_video(url):
         raise Exception("Failed to download the subtitles.")
 
     transcript = format_transcript(response.text)
-    print({
-        "content": transcript, 
-        "title": title, 
-        "publisher": publisher, 
-        "publisher_id": publisher_id, 
-        "publisher_url": uploader_url,
-        "description": description, 
-        "published_at": published_at
-    })
+
     return {
         "content": transcript, 
         "title": title, 
@@ -148,9 +140,9 @@ def get_youtube_channel_videos(channel_url: str, limit: int = 5) -> List[str]:
         
         # Extract video URLs from the feed
         video_urls = []
-        count = 0
-        while count < limit and count < len(feed.entries):
-            entry = feed.entries[count]
+        for entry in feed.entries:
+            if len(video_urls) >= limit:
+                break
             link_href = ""
             if hasattr(entry, "links"):
                 for l in entry.links:
@@ -159,27 +151,9 @@ def get_youtube_channel_videos(channel_url: str, limit: int = 5) -> List[str]:
                         break
             if "youtube.com/shorts/" in link_href:
                 continue
-
             video_urls.append(link_href)
-            count += 1
 
         return video_urls
     except Exception as e:
         print(f"Error retrieving YouTube videos: {e}")
         return []
-
-def main():
-    if len(sys.argv) != 2:
-        print("Usage: python youtube_extractor.py <YouTube Video URL>")
-        sys.exit(1)
-    
-    url = sys.argv[1]
-    try:
-        channel_data = scrap_video(url)
-        print("Channel data:\n")
-        # print(channel_data.get("content"))
-    except Exception as e:
-        print(f"Error: {e}")
-
-if __name__ == "__main__":
-    main()

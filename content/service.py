@@ -8,7 +8,6 @@ from extractors.dev_to import scrap_article as scrap_dev_to_article
 from fastapi import HTTPException
 from tasks.content import process_content_task
 
-
 SOURCE_TYPE_CONTENT_EXTRACTORS: Dict[models.SourceType, Callable[[str], Dict[str, Any]]] = {
     models.SourceType.YOUTUBE: scrap_video,
     models.SourceType.MEDIUM: scrap_article,
@@ -33,12 +32,6 @@ def queue_content_processing(
     Returns:
         The created Content model (in PENDING status)
     """    
-    # Check if content already exists
-    existing = db.query(models.Content).filter(models.Content.url == url).first()
-    if existing:
-        return existing
-    
-    # Create pending content record
     db_content = models.Content(
         title="Processing...",
         url=url,
@@ -50,14 +43,12 @@ def queue_content_processing(
     db.commit()
     db.refresh(db_content)
     
-    # Dispatch Celery task
     task = process_content_task.delay(
         url=url,
         source_type=source.type.value,
         source_id=str(source.id),
     )
     
-    # Store task ID for tracking
     db_content.task_id = task.id
     db.commit()
     
@@ -88,43 +79,6 @@ def get_contents(db: Session, user_id: uuid.UUID, limit: int = 12, offset: int =
     
     return contents
 
-def retrieve_content(
-    db: Session, 
-    url: str, 
-    source_type: models.SourceType,
-) -> models.Content:
-    """
-    Retrieve a content, summarize it and save it to the database.
-    
-    Args:
-        db: Database session
-        url: Content URL
-        source_type: Type of source
-        
-    Returns:
-        Content model (may be in PENDING status if async_mode=True)
-    """
-    # Check if content already exists
-    existing = db.query(models.Content).filter(models.Content.url == url).first()
-    if existing:
-        return existing
-    
-    # Find the source first for async mode
-    # We need to extract content data to get publisher_id
-    content_data = SOURCE_TYPE_CONTENT_EXTRACTORS[source_type](url)
-        
-    content_source = db.query(models.Source).filter(
-        models.Source.type == source_type,
-        models.Source.original_id == content_data["publisher_id"]
-    ).first()
-    
-    if not content_source:
-        raise HTTPException(status_code=404, detail="Source not found")
-    
-    return queue_content_processing(db, url, content_source)
-    
-
-
 def retrieve_content_for_source(
     db: Session, 
     source: models.Source, 
@@ -144,13 +98,12 @@ def retrieve_content_for_source(
     Returns:
         Content model (may be in PENDING status if async_mode=True)
     """
-    # Check if content already exists
     existing = db.query(models.Content).filter(models.Content.url == url).first()
     if existing:
         return existing
     
     return queue_content_processing(db, url, source)
-    
+
 
 def get_content_by_id(db: Session, content_id: uuid.UUID) -> models.Content:
     """Get a content by its ID"""

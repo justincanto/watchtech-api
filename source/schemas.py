@@ -43,6 +43,7 @@ class UserSourcesUpdateResponse(BaseModel):
     """Response for PUT /api/source/ with batch_id for progress tracking"""
     batch_id: str
     sources: List[Source]
+    new_source_ids: List[str]
     
     class Config:
         from_attributes = True

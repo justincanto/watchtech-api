@@ -33,8 +33,22 @@ async def get_source_progress(batch_id: str, db: Session = Depends(get_db)):
     # Get the source IDs for this batch
     source_ids = await get_batch_sources(batch_id)
     
-    if not source_ids:
+    if source_ids is None:
         raise HTTPException(status_code=404, detail="Batch not found or expired")
+    
+    # If batch exists but has no new sources, return immediately with batch_complete
+    if len(source_ids) == 0:
+        async def empty_generator():
+            yield f"event: batch_complete\ndata: {json.dumps({'batch_id': batch_id, 'message': 'No new sources to process'})}\n\n"
+        return StreamingResponse(
+            empty_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            }
+        )
     
     async def event_generator():
         """Generate SSE events for source progress updates."""
@@ -60,7 +74,7 @@ async def get_source_progress(batch_id: str, db: Session = Depends(get_db)):
                         completed_sources.add(source_id)
                         event_data = {
                             "source_id": source_id,
-                            "status": "completed",
+                            "status": models.SourceStatus.COMPLETED.value,
                             "progress": 1.0,
                             "message": "Source already processed",
                             "source_url": source.url,
@@ -71,7 +85,7 @@ async def get_source_progress(batch_id: str, db: Session = Depends(get_db)):
                         completed_sources.add(source_id)
                         event_data = {
                             "source_id": source_id,
-                            "status": "failed",
+                            "status": models.SourceStatus.FAILED.value,
                             "progress": 0.0,
                             "message": source.error_message or "Processing failed",
                             "source_url": source.url,
@@ -114,7 +128,7 @@ async def get_source_progress(batch_id: str, db: Session = Depends(get_db)):
                     yield f"event: source_progress\ndata: {json.dumps(data)}\n\n"
                     
                     # Track completed sources
-                    if data.get("status") in ["completed", "failed"]:
+                    if data.get("status") in [models.SourceStatus.COMPLETED.value, models.SourceStatus.FAILED.value]:
                         completed_sources.add(source_id)
                         
                         # Check if all sources are done
@@ -179,5 +193,5 @@ def update_user_sources(
         }
         for source in sources_data.sources
     ]
-    batch_id, sources = service.update_user_sources(db=db, user_id=current_user.id, sources_data=sources_dict)
-    return {"batch_id": batch_id, "sources": sources}
+    batch_id, sources, new_source_ids = service.update_user_sources(db=db, user_id=current_user.id, sources_data=sources_dict)
+    return {"batch_id": batch_id, "sources": sources, "new_source_ids": new_source_ids}

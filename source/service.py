@@ -72,14 +72,15 @@ def get_user_sources(db: Session, user_id: uuid.UUID) -> List[models.Source]:
      
     return sources
 
-def update_user_sources(db: Session, user_id: uuid.UUID, sources_data: List[dict]) -> Tuple[str, List[models.Source]]:
+def update_user_sources(db: Session, user_id: uuid.UUID, sources_data: List[dict]) -> Tuple[str, List[models.Source], List[str]]:
     """
     Update the sources for a user with async processing.
     
     Returns:
-        Tuple of (batch_id, sources list)
+        Tuple of (batch_id, sources list, new_source_ids)
         - batch_id: Can be used to track progress via SSE endpoint
         - sources: List of source models (some may be in PENDING status)
+        - new_source_ids: List of source IDs that need processing (for frontend tracking)
     """
     try:
         # Generate batch ID for progress tracking
@@ -92,8 +93,8 @@ def update_user_sources(db: Session, user_id: uuid.UUID, sources_data: List[dict
         existing_source_ids = {us.source_id for us in existing_user_sources}
         
         new_source_ids = set()
-        sources_to_process = []  # Sources that need task dispatch
-        all_batch_source_ids = []  # All sources in this batch for progress tracking
+        sources_to_process = []  # Sources that need task dispatch (PENDING or FAILED)
+        new_source_id_strings = []  # Only new sources for progress tracking
         
         for source_data in sources_data:    
             source = get_or_create_source(
@@ -103,7 +104,6 @@ def update_user_sources(db: Session, user_id: uuid.UUID, sources_data: List[dict
             )
             
             new_source_ids.add(source.id)
-            all_batch_source_ids.append(str(source.id))
 
             if source.id not in existing_source_ids:
                 user_source = models.UserSource(
@@ -115,6 +115,7 @@ def update_user_sources(db: Session, user_id: uuid.UUID, sources_data: List[dict
             # Check if source needs processing (PENDING or FAILED)
             if source.status in [models.SourceStatus.PENDING, models.SourceStatus.FAILED]:
                 sources_to_process.append(source)
+                new_source_id_strings.append(str(source.id))
         
         sources_to_remove = existing_source_ids - new_source_ids
         if sources_to_remove:
@@ -125,8 +126,8 @@ def update_user_sources(db: Session, user_id: uuid.UUID, sources_data: List[dict
         
         db.commit()
         
-        # Store batch -> source_ids mapping in Redis for SSE endpoint
-        store_batch_sources_sync(batch_id, all_batch_source_ids)
+        # Store only NEW source IDs in Redis for SSE endpoint (not already processed ones)
+        store_batch_sources_sync(batch_id, new_source_id_strings)
         
         # Dispatch tasks for sources that need processing
         # Import here to avoid circular dependency with tasks.source
@@ -138,7 +139,7 @@ def update_user_sources(db: Session, user_id: uuid.UUID, sources_data: List[dict
         
         clean_up_orphan_subscriptions(db)
 
-        return batch_id, updated_sources
+        return batch_id, updated_sources, new_source_id_strings
     
     except Exception as e: 
         print(f"Error updating user sources: {str(e)}")
