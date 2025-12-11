@@ -68,24 +68,6 @@ services:
     networks:
       - internal
 
-  # Celery beat scheduler for periodic tasks (optional, for future use)
-  celery-beat:
-    build: .
-    container_name: watchtech-celery-beat
-    command: celery -A celery_app.celery_app beat --loglevel=info
-    env_file:
-      - ./.env
-    environment:
-      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672//
-    volumes:
-      - .:/app
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-    restart: unless-stopped
-    networks:
-      - internal
-
   # RabbitMQ message broker
   rabbitmq:
     image: rabbitmq:3.13-management-alpine
