@@ -196,7 +196,7 @@ async def google_auth_callback(code: str, db: Session, response: Response, user_
         key=SESSION_COOKIE_KEY,
         value=session.token,
         expires=session.expires_at.astimezone(timezone.utc),
-        domain = "localhost" if os.getenv("ENVIRONMENT") == "development" else os.getenv("DOMAIN_NAME", None),
+        domain = os.getenv("DOMAIN_NAME"),
         httponly=True,
         secure=os.getenv("ENVIRONMENT") != "development",
         samesite="lax"
