@@ -197,7 +197,7 @@ def process_source_task(
             
             for url in content_urls:
                 try:
-                    content_service.retrieve_content_for_source(db, source, url)
+                    content_service.queue_content_processing(db, source, url)
                 except Exception as e:
                     logger.warning(f"Error queuing content {url} for source {source_id}: {e}")
             

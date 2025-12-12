@@ -151,7 +151,7 @@ def process_youtube_webhook(db: Session, body: bytes) -> None:
             continue
 
         try:
-            content_service.retrieve_content_for_source(
+            content_service.queue_content_processing(
                 db, source, video_url
             )
         except Exception as e:

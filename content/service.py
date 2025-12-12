@@ -7,8 +7,8 @@ from tasks.content import process_content_task
 
 def queue_content_processing(
     db: Session, 
+    source: models.Source,
     url: str, 
-    source: models.Source
 ) -> models.Content:
     """
     Queue content for async processing via Celery.
@@ -22,6 +22,10 @@ def queue_content_processing(
     Returns:
         The created Content model (in PENDING status)
     """    
+    existing = db.query(models.Content).filter(models.Content.url == url).first()
+    if existing:
+        return existing
+        
     db_content = models.Content(
         title="Processing...",
         url=url,
@@ -71,31 +75,6 @@ def get_contents(db: Session, user_id: uuid.UUID, limit: int = 12, offset: int =
     )
     
     return contents
-
-def retrieve_content_for_source(
-    db: Session, 
-    source: models.Source, 
-    url: str,
-) -> models.Content:
-    """
-    Retrieve a content URL specifically for a given source type and source.
-
-    This avoids an extra DB lookup of the source by publisher_url and ties the
-    content directly to the provided source.
-    
-    Args:
-        db: Database session
-        source: The source model
-        url: Content URL
-        
-    Returns:
-        Content model (may be in PENDING status if async_mode=True)
-    """
-    existing = db.query(models.Content).filter(models.Content.url == url).first()
-    if existing:
-        return existing
-    
-    return queue_content_processing(db, url, source)
 
 def get_user_content_by_id(db: Session, content_id: uuid.UUID, user_id: uuid.UUID) -> models.Content:
     """Get a content by its ID for a specific user. Returns None if content is not fully processed."""
