@@ -42,14 +42,21 @@ def get_or_create_source(db: Session, type: models.SourceType, url: str) -> mode
 
 def get_source(db: Session, source_id: uuid.UUID, limit_contents: int = 12) -> Optional[models.Source]:
     """
-    Get a source by ID and include its most recent contents.
+    Get a source by ID and include its most recent completed contents.
+    Only returns contents that are fully processed.
     """
-    source = db.query(models.Source).filter(models.Source.id == source_id).first()
+    source = db.query(models.Source).filter(
+        models.Source.id == source_id, 
+        models.Source.status == models.SourceStatus.COMPLETED
+    ).first()
     
     if source:
         recent_contents = (
             db.query(models.Content)
-            .filter(models.Content.source_id == source_id)
+            .filter(
+                models.Content.source_id == source_id,
+                models.Content.status == models.ContentStatus.COMPLETED
+            )
             .order_by(models.Content.created_at.desc())
             .limit(limit_contents)
             .all()

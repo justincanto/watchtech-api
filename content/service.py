@@ -55,7 +55,7 @@ def queue_content_processing(
     return db_content
 
 def get_contents(db: Session, user_id: uuid.UUID, limit: int = 12, offset: int = 0) -> List[models.Content]:
-    """Get paginated content from all sources a user is subscribed to, optionally filtered by categories"""
+    """Get paginated content from all sources a user is subscribed to, only returns fully processed content"""
     source_ids = (
         db.query(models.UserSource.source_id)
         .filter(models.UserSource.user_id == user_id)
@@ -70,7 +70,10 @@ def get_contents(db: Session, user_id: uuid.UUID, limit: int = 12, offset: int =
     contents = (
         db.query(models.Content).
         join(models.Source).
-        filter(models.Source.id.in_(source_ids))
+        filter(
+            models.Source.id.in_(source_ids),
+            models.Content.status == models.ContentStatus.COMPLETED
+        )
         .order_by(models.Content.published_at.desc())
         .offset(offset)
         .limit(limit)
@@ -104,18 +107,18 @@ def retrieve_content_for_source(
     
     return queue_content_processing(db, url, source)
 
-
-def get_content_by_id(db: Session, content_id: uuid.UUID) -> models.Content:
-    """Get a content by its ID"""
-    return db.query(models.Content).filter(models.Content.id == content_id).first()
-
 def get_user_content_by_id(db: Session, content_id: uuid.UUID, user_id: uuid.UUID) -> models.Content:
-    """Get a content by its ID for a specific user"""
-    content = get_content_by_id(db, content_id)
+    """Get a content by its ID for a specific user. Returns None if content is not fully processed."""
+    content = db.query(models.Content).filter(
+        models.Content.id == content_id,
+        models.Content.status == models.ContentStatus.COMPLETED,
+    ).first()
+
     if not content:
         return None
-    # Ensure the content belongs to one of the user's sources
+        
     user_source_ids = [sid for (sid,) in db.query(models.UserSource.source_id).filter(models.UserSource.user_id == user_id).all()]
     if content.source_id not in user_source_ids:
         return None
+        
     return content

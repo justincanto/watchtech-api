@@ -9,7 +9,7 @@ from extractors.youtube import scrap_video
 from extractors.medium import scrap_article
 from extractors.dev_to import scrap_article as scrap_dev_to_article
 from agents.summarizer import summarize_content
-from utils.redis_client import increment_source_content_processed, publish_source_progress
+from utils.redis_client import increment_source_content_processed, publish_source_progress, publish_content_processed
 
 logger = get_task_logger(__name__)
 
@@ -113,7 +113,6 @@ def process_content_task(
         
         logger.info(f"Content extracted: {db_content.title}")
         
-        # Step 2: Generate summary
         try:
             summary = summarize_content(content_data.get("content", ""))
             db_content.summary = summary
@@ -121,6 +120,14 @@ def process_content_task(
             db_content.error_message = None
             db.commit()
             logger.info(f"Content processing completed: {content_id}")
+            
+            # Publish content processed event for real-time UI updates
+            publish_content_processed(
+                content_id=str(content_id),
+                source_id=source_id,
+                title=db_content.title,
+                url=db_content.url,
+            )
         except Exception as e:
             db_content.status = models.ContentStatus.FAILED
             db_content.error_message = f"Summarization failed: {str(e)}"

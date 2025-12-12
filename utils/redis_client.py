@@ -12,6 +12,9 @@ REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 # Batch TTL in seconds (1 hour)
 BATCH_TTL = 3600
 
+# Channel for global content processed events
+CONTENT_PROCESSED_CHANNEL = "content:processed"
+
 # Sync Redis client for Celery tasks
 _sync_redis_client: Optional[redis.Redis] = None
 
@@ -190,3 +193,31 @@ def increment_source_content_processed(source_id: str) -> Optional[dict]:
     )
     
     return tracking
+
+
+def publish_content_processed(
+    content_id: str,
+    source_id: str,
+    title: str,
+    url: str,
+) -> None:
+    """
+    Publish a content processed event to the global channel.
+    Called when a content item finishes processing successfully.
+    
+    Args:
+        content_id: UUID of the content
+        source_id: UUID of the source this content belongs to
+        title: Title of the content
+        url: URL of the content
+    """
+    client = get_sync_redis_client()
+    
+    event_data = {
+        "content_id": content_id,
+        "source_id": source_id,
+        "title": title,
+        "url": url,
+    }
+    
+    client.publish(CONTENT_PROCESSED_CHANNEL, json.dumps(event_data))
