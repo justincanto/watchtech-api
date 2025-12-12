@@ -8,7 +8,6 @@ from source.router import router as source_router
 from auth.router import router as auth_router
 from db.database import Base, engine
 from subscriptions.router import router as subscriptions_router
-from transcript.router import router as transcript_router
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy.orm import Session
 from db.database import SessionLocal
@@ -63,7 +62,6 @@ app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
 app.include_router(content_router, prefix="/api/content", tags=["content"])
 app.include_router(source_router, prefix="/api/source", tags=["source"])
 app.include_router(subscriptions_router, prefix="/api/webhooks", tags=["webhooks"])
-app.include_router(transcript_router, prefix="/api/transcript", tags=["transcript"])
 
 @app.get("/health")
 async def health_check():
