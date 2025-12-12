@@ -3,7 +3,6 @@ import json
 import requests
 from yt_dlp import YoutubeDL
 from datetime import datetime
-import feedparser
 from typing import List
 import os
 
@@ -127,31 +126,23 @@ def get_youtube_channel_videos(channel_url: str, limit: int = 5) -> List[str]:
     Returns:
         List[str]: List of video URLs
     """
-    # Convert channel URL to channel ID if needed
-    channel_data = get_channel_data(channel_url)
-    
-    # We'll use the YouTube RSS feed to get recent videos
-    feed_url = f"https://www.youtube.com/feeds/videos.xml?channel_id={channel_data['id']}"
+    ydl_opts = {
+        'skip_download': True,
+        'quiet': True,
+        "extract_flat": True,
+    }
+    ydl_opts["proxy"] = RESIDENTIAL_PROXY
+
     try:
-        response = requests.get(feed_url, proxies=get_proxy())
-        response.raise_for_status()
-        
-        feed = feedparser.parse(response.content)
-        
-        # Extract video URLs from the feed
-        video_urls = []
-        for entry in feed.entries:
-            if len(video_urls) >= limit:
-                break
-            link_href = ""
-            if hasattr(entry, "links"):
-                for l in entry.links:
-                    if l.get("rel") == "alternate" and l.get("href"):
-                        link_href = l.get("href")
-                        break
-            if "youtube.com/shorts/" in link_href:
-                continue
-            video_urls.append(link_href)
+        with YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(channel_url, download=False)
+
+        entries = info.get("entries") or []
+        if not entries:
+            return []
+
+        video_entries = entries[0].get("entries") or []
+        video_urls = [entry.get("url") for entry in video_entries[:limit]]
 
         return video_urls
     except Exception as e:

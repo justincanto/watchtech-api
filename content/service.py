@@ -1,18 +1,8 @@
 from sqlalchemy.orm import Session
 import uuid
-from typing import List, Dict, Any, Callable
+from typing import List
 from db import models
-from extractors.youtube import scrap_video
-from extractors.medium import scrap_article
-from extractors.dev_to import scrap_article as scrap_dev_to_article
-from fastapi import HTTPException
 from tasks.content import process_content_task
-
-SOURCE_TYPE_CONTENT_EXTRACTORS: Dict[models.SourceType, Callable[[str], Dict[str, Any]]] = {
-    models.SourceType.YOUTUBE: scrap_video,
-    models.SourceType.MEDIUM: scrap_article,
-    models.SourceType.DEV_TO: scrap_dev_to_article,
-}
 
 
 def queue_content_processing(
