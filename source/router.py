@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from db.database import get_db
 from auth.service import get_current_user
 from auth.schemas import User
-from utils.redis_client import get_batch_sources, get_async_redis_client
+from utils.redis_client import get_batch_sources, get_async_redis_client, get_source_content_tracking
 from db import models
 
 router = APIRouter(
@@ -27,6 +27,9 @@ async def get_source_progress(batch_id: str, db: Session = Depends(get_db)):
     
     Events:
         - source_progress: Progress update for a specific source
+          Contains: source_id, status, progress, message, source_url, source_name,
+                   content_total, success_content_ids, failed_content_ids,
+                   has_warning, is_complete
         - batch_complete: All sources in batch are done (completed or failed)
         - error: An error occurred
     """
@@ -70,39 +73,46 @@ async def get_source_progress(batch_id: str, db: Session = Depends(get_db)):
                 ).first()
                 
                 if source:
+                    # Get content tracking state if available
+                    tracking = get_source_content_tracking(source_id)
+                    
+                    event_data = {
+                        "source_id": source_id,
+                        "source_url": source.url,
+                        "source_name": source.name,
+                    }
+                    
+                    # Add tracking data if available
+                    if tracking:
+                        event_data["content_total"] = tracking["content_total"]
+                        event_data["success_content_ids"] = tracking["success_content_ids"]
+                        event_data["failed_content_ids"] = tracking["failed_content_ids"]
+                        event_data["has_warning"] = tracking["has_warning"]
+                        event_data["is_complete"] = tracking["is_complete"]
+                    
                     if source.status == models.SourceStatus.COMPLETED:
                         completed_sources.add(source_id)
-                        event_data = {
-                            "source_id": source_id,
+                        event_data.update({
                             "status": models.SourceStatus.COMPLETED.value,
                             "progress": 1.0,
                             "message": "Source already processed",
-                            "source_url": source.url,
-                            "source_name": source.name,
-                        }
-                        yield f"event: source_progress\ndata: {json.dumps(event_data)}\n\n"
+                        })
                     elif source.status == models.SourceStatus.FAILED:
                         completed_sources.add(source_id)
-                        event_data = {
-                            "source_id": source_id,
+                        event_data.update({
                             "status": models.SourceStatus.FAILED.value,
                             "progress": 0.0,
                             "message": source.error_message or "Processing failed",
-                            "source_url": source.url,
-                            "source_name": source.name,
-                        }
-                        yield f"event: source_progress\ndata: {json.dumps(event_data)}\n\n"
+                        })
                     else:
                         # Source is still processing, send current status
-                        event_data = {
-                            "source_id": source_id,
+                        event_data.update({
                             "status": source.status.value,
                             "progress": 0.0,
                             "message": f"Processing: {source.status.value}",
-                            "source_url": source.url,
-                            "source_name": source.name,
-                        }
-                        yield f"event: source_progress\ndata: {json.dumps(event_data)}\n\n"
+                        })
+                    
+                    yield f"event: source_progress\ndata: {json.dumps(event_data)}\n\n"
             
             # Check if all sources are already done
             if len(completed_sources) == len(source_ids):

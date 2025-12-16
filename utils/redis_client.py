@@ -12,9 +12,6 @@ REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 # Batch TTL in seconds (1 hour)
 BATCH_TTL = 3600
 
-# Channel for global content processed events
-CONTENT_PROCESSED_CHANNEL = "content:processed"
-
 # Sync Redis client for Celery tasks
 _sync_redis_client: Optional[redis.Redis] = None
 
@@ -73,7 +70,10 @@ def publish_source_progress(
     source_url: Optional[str] = None,
     source_name: Optional[str] = None,
     content_total: Optional[int] = None,
-    content_processed: Optional[int] = None,
+    success_content_ids: Optional[List[str]] = None,
+    failed_content_ids: Optional[List[str]] = None,
+    has_warning: Optional[bool] = None,
+    is_complete: Optional[bool] = None,
 ) -> None:
     """
     Publish a progress event for a source.
@@ -87,7 +87,10 @@ def publish_source_progress(
         source_url: Optional source URL for context
         source_name: Optional source name (once fetched)
         content_total: Optional total number of content items to process
-        content_processed: Optional number of content items processed so far
+        success_content_ids: Optional list of successfully processed content IDs
+        failed_content_ids: Optional list of failed content IDs
+        has_warning: Optional flag indicating if there are failures
+        is_complete: Optional flag indicating if all content is processed
     """
     client = get_sync_redis_client()
     channel = f"source:{source_id}:progress"
@@ -105,8 +108,14 @@ def publish_source_progress(
         event_data["source_name"] = source_name
     if content_total is not None:
         event_data["content_total"] = content_total
-    if content_processed is not None:
-        event_data["content_processed"] = content_processed
+    if success_content_ids is not None:
+        event_data["success_content_ids"] = success_content_ids
+    if failed_content_ids is not None:
+        event_data["failed_content_ids"] = failed_content_ids
+    if has_warning is not None:
+        event_data["has_warning"] = has_warning
+    if is_complete is not None:
+        event_data["is_complete"] = is_complete
     
     client.publish(channel, json.dumps(event_data))
 
@@ -133,7 +142,8 @@ def init_source_content_tracking(
     """
     client = get_sync_redis_client()
     tracking_key = f"source:{source_id}:content_tracking"
-    counter_key = f"source:{source_id}:content_counter"
+    success_key = f"source:{source_id}:success_ids"
+    failed_key = f"source:{source_id}:failed_ids"
     
     tracking_data = {
         "content_total": content_total,
@@ -142,25 +152,23 @@ def init_source_content_tracking(
     }
     
     client.set(tracking_key, json.dumps(tracking_data), ex=BATCH_TTL)
-    client.set(counter_key, 0, ex=BATCH_TTL)
+    # Clear any existing sets and set TTL
+    client.delete(success_key, failed_key)
+    # Create empty sets with TTL by adding and removing a dummy value
+    # This ensures the keys exist for SMEMBERS calls
+    
 
-
-def increment_source_content_processed(source_id: str) -> Optional[dict]:
+def _get_content_tracking_state(client: redis.Redis, source_id: str) -> Optional[dict]:
     """
-    Increment the content processed count for a source and publish progress.
-    Called by content task when it finishes processing.
+    Get the current content tracking state for a source.
     
-    Uses atomic INCR to safely handle concurrent updates from multiple workers.
-    
-    Args:
-        source_id: UUID of the source
-        
     Returns:
-        Updated tracking data dict (with content_processed), or None if tracking not found
+        Dict with tracking data, success_ids, failed_ids, and computed fields,
+        or None if tracking not found.
     """
-    client = get_sync_redis_client()
     tracking_key = f"source:{source_id}:content_tracking"
-    counter_key = f"source:{source_id}:content_counter"
+    success_key = f"source:{source_id}:success_ids"
+    failed_key = f"source:{source_id}:failed_ids"
     
     data = client.get(tracking_key)
     if not data:
@@ -168,15 +176,52 @@ def increment_source_content_processed(source_id: str) -> Optional[dict]:
     
     tracking = json.loads(data)
     
-    content_processed = client.incr(counter_key)
-    client.expire(counter_key, BATCH_TTL)
+    # Get sets atomically
+    success_ids = list(client.smembers(success_key))
+    failed_ids = list(client.smembers(failed_key))
     
     content_total = tracking["content_total"]
+    total_processed = len(success_ids) + len(failed_ids)
     
-    tracking["content_processed"] = content_processed
+    tracking["success_content_ids"] = success_ids
+    tracking["failed_content_ids"] = failed_ids
+    tracking["has_warning"] = len(failed_ids) > 0
+    tracking["is_complete"] = total_processed == content_total
+    tracking["total_processed"] = total_processed
+    
+    return tracking
+
+
+def add_success_content(source_id: str, content_id: str) -> Optional[dict]:
+    """
+    Add a content ID to the success set for a source and publish progress.
+    Called by content task when processing completes successfully.
+    
+    Uses atomic SADD to safely handle concurrent updates from multiple workers.
+    
+    Args:
+        source_id: UUID of the source
+        content_id: UUID of the content that succeeded
+        
+    Returns:
+        Updated tracking data dict, or None if tracking not found
+    """
+    client = get_sync_redis_client()
+    success_key = f"source:{source_id}:success_ids"
+    
+    # Add to success set (atomic operation)
+    client.sadd(success_key, content_id)
+    client.expire(success_key, BATCH_TTL)
+    
+    tracking = _get_content_tracking_state(client, source_id)
+    if not tracking:
+        return None
+    
+    content_total = tracking["content_total"]
+    total_processed = tracking["total_processed"]
     
     if content_total > 0:
-        content_progress = content_processed / content_total
+        content_progress = total_processed / content_total
         overall_progress = PROGRESS_CONTENT_START + (PROGRESS_CONTENT_END - PROGRESS_CONTENT_START) * content_progress
     else:
         overall_progress = PROGRESS_CONTENT_END
@@ -185,39 +230,132 @@ def increment_source_content_processed(source_id: str) -> Optional[dict]:
         source_id=source_id,
         status="ingesting_content",
         progress=overall_progress,
-        message=f"Processed {content_processed}/{content_total} items",
+        message=f"Processed {total_processed}/{content_total} items",
         source_url=tracking["source_url"],
         source_name=tracking["source_name"],
         content_total=content_total,
-        content_processed=content_processed,
+        success_content_ids=tracking["success_content_ids"],
+        failed_content_ids=tracking["failed_content_ids"],
+        has_warning=tracking["has_warning"],
+        is_complete=tracking["is_complete"],
     )
     
     return tracking
 
 
-def publish_content_processed(
-    content_id: str,
-    source_id: str,
-    title: str,
-    url: str,
-) -> None:
+def add_failed_content(source_id: str, content_id: str) -> Optional[dict]:
     """
-    Publish a content processed event to the global channel.
-    Called when a content item finishes processing successfully.
+    Add a content ID to the failed set for a source and publish progress.
+    Called by content task when processing fails.
+    
+    Uses atomic SADD to safely handle concurrent updates from multiple workers.
     
     Args:
-        content_id: UUID of the content
-        source_id: UUID of the source this content belongs to
-        title: Title of the content
-        url: URL of the content
+        source_id: UUID of the source
+        content_id: UUID of the content that failed
+        
+    Returns:
+        Updated tracking data dict, or None if tracking not found
     """
     client = get_sync_redis_client()
+    failed_key = f"source:{source_id}:failed_ids"
     
-    event_data = {
-        "content_id": content_id,
-        "source_id": source_id,
-        "title": title,
-        "url": url,
-    }
+    # Add to failed set (atomic operation)
+    client.sadd(failed_key, content_id)
+    client.expire(failed_key, BATCH_TTL)
     
-    client.publish(CONTENT_PROCESSED_CHANNEL, json.dumps(event_data))
+    tracking = _get_content_tracking_state(client, source_id)
+    if not tracking:
+        return None
+    
+    content_total = tracking["content_total"]
+    total_processed = tracking["total_processed"]
+    
+    if content_total > 0:
+        content_progress = total_processed / content_total
+        overall_progress = PROGRESS_CONTENT_START + (PROGRESS_CONTENT_END - PROGRESS_CONTENT_START) * content_progress
+    else:
+        overall_progress = PROGRESS_CONTENT_END
+    
+    publish_source_progress(
+        source_id=source_id,
+        status="ingesting_content",
+        progress=overall_progress,
+        message=f"Processed {total_processed}/{content_total} items",
+        source_url=tracking["source_url"],
+        source_name=tracking["source_name"],
+        content_total=content_total,
+        success_content_ids=tracking["success_content_ids"],
+        failed_content_ids=tracking["failed_content_ids"],
+        has_warning=tracking["has_warning"],
+        is_complete=tracking["is_complete"],
+    )
+    
+    return tracking
+
+
+def move_failed_to_success(source_id: str, content_id: str) -> Optional[dict]:
+    """
+    Move a content ID from the failed set to the success set (for retries).
+    Called by content task when a retry succeeds.
+    
+    Uses atomic SMOVE to safely handle concurrent updates.
+    
+    Args:
+        source_id: UUID of the source
+        content_id: UUID of the content that succeeded on retry
+        
+    Returns:
+        Updated tracking data dict, or None if tracking not found
+    """
+    client = get_sync_redis_client()
+    success_key = f"source:{source_id}:success_ids"
+    failed_key = f"source:{source_id}:failed_ids"
+    
+    client.smove(failed_key, success_key, content_id)
+    client.expire(success_key, BATCH_TTL)
+    client.expire(failed_key, BATCH_TTL)
+    
+    tracking = _get_content_tracking_state(client, source_id)
+    if not tracking:
+        return None
+    
+    content_total = tracking["content_total"]
+    total_processed = tracking["total_processed"]
+    
+    if content_total > 0:
+        content_progress = total_processed / content_total
+        overall_progress = PROGRESS_CONTENT_START + (PROGRESS_CONTENT_END - PROGRESS_CONTENT_START) * content_progress
+    else:
+        overall_progress = PROGRESS_CONTENT_END
+    
+    publish_source_progress(
+        source_id=source_id,
+        status="ingesting_content",
+        progress=overall_progress,
+        message=f"Processed {total_processed}/{content_total} items",
+        source_url=tracking["source_url"],
+        source_name=tracking["source_name"],
+        content_total=content_total,
+        success_content_ids=tracking["success_content_ids"],
+        failed_content_ids=tracking["failed_content_ids"],
+        has_warning=tracking["has_warning"],
+        is_complete=tracking["is_complete"],
+    )
+    
+    return tracking
+
+
+def get_source_content_tracking(source_id: str) -> Optional[dict]:
+    """
+    Get the current content tracking state for a source.
+    
+    Args:
+        source_id: UUID of the source
+        
+    Returns:
+        Tracking data dict with success_ids, failed_ids, and computed fields,
+        or None if tracking not found
+    """
+    client = get_sync_redis_client()
+    return _get_content_tracking_state(client, source_id)

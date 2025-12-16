@@ -9,11 +9,15 @@ from extractors.youtube import scrap_video
 from extractors.medium import scrap_article
 from extractors.dev_to import scrap_article as scrap_dev_to_article
 from agents.summarizer import summarize_content
-from utils.redis_client import increment_source_content_processed, publish_source_progress, publish_content_processed
+from utils.redis_client import (
+    add_success_content,
+    add_failed_content,
+    move_failed_to_success,
+    publish_source_progress,
+)
 
 logger = get_task_logger(__name__)
 
-# Mapping from source type string to extractor function
 SOURCE_TYPE_EXTRACTORS = {
     "youtube": scrap_video,
     "medium": scrap_article,
@@ -53,47 +57,21 @@ def process_content_task(
     
     db = SessionLocal()
     try:
-        # Find existing content record (should be created by queue_content_processing)
         db_content = db.query(models.Content).filter(models.Content.url == url).first()
         
-        if db_content and db_content.status == models.ContentStatus.COMPLETED:
-            logger.info(f"Content already completed: {db_content.id}")
+        if db_content and db_content.status not in [models.ContentStatus.PENDING, models.ContentStatus.FAILED]:
+            logger.info(f"Content already completed or being processed: {db_content.id}")
             return str(db_content.id)
-        
-        # If no record exists, create one (fallback for direct task calls)
-        if not db_content:
-            source = db.query(models.Source).filter(
-                models.Source.id == uuid.UUID(source_id)
-            ).first()
-            
-            if not source:
-                logger.error(f"Source not found: {source_id}")
-                return None
-            
-            db_content = models.Content(
-                title="Processing...",
-                url=url,
-                source_id=source.id,
-                status=models.ContentStatus.PENDING,
-                published_at=None,
-            )
-            db.add(db_content)
-            db.commit()
-            db.refresh(db_content)
+
+        is_retry = db_content and db_content.status == models.ContentStatus.FAILED
         
         content_id = db_content.id
         logger.info(f"Processing content record: {content_id}")
         
-        # Step 1: Extract content data
         db_content.status = models.ContentStatus.EXTRACTING
         db.commit()
         
         extractor = SOURCE_TYPE_EXTRACTORS.get(source_type)
-        if not extractor:
-            db_content.status = models.ContentStatus.FAILED
-            db_content.error_message = f"Unknown source type: {source_type}"
-            db.commit()
-            raise ValueError(f"Unknown source type: {source_type}")
         
         try:
             content_data = extractor(url)
@@ -101,9 +79,10 @@ def process_content_task(
             db_content.status = models.ContentStatus.FAILED
             db_content.error_message = f"Extraction failed: {str(e)}"
             db.commit()
+            
+            add_failed_content(source_id, str(content_id))
             raise
         
-        # Update with extracted data
         db_content.title = content_data["title"]
         db_content.transcript = content_data.get("content")
         db_content.description = content_data.get("description")
@@ -121,22 +100,20 @@ def process_content_task(
             db.commit()
             logger.info(f"Content processing completed: {content_id}")
             
-            # Publish content processed event for real-time UI updates
-            publish_content_processed(
-                content_id=str(content_id),
-                source_id=source_id,
-                title=db_content.title,
-                url=db_content.url,
-            )
         except Exception as e:
             db_content.status = models.ContentStatus.FAILED
             db_content.error_message = f"Summarization failed: {str(e)}"
             db.commit()
+            
+            add_failed_content(source_id, str(content_id))
             raise
         
-        tracking = increment_source_content_processed(source_id)
+        if is_retry:
+            tracking = move_failed_to_success(source_id, str(content_id))
+        else:
+            tracking = add_success_content(source_id, str(content_id))
         
-        if tracking and (tracking["content_processed"] >= tracking["content_total"]):
+        if tracking and tracking["is_complete"]:
             source = db.query(models.Source).filter(
                 models.Source.id == uuid.UUID(source_id)
             ).first()
@@ -154,10 +131,13 @@ def process_content_task(
                     source_url=tracking["source_url"],
                     source_name=tracking["source_name"],
                     content_total=tracking["content_total"],
-                    content_processed=tracking["content_processed"],
+                    success_content_ids=tracking["success_content_ids"],
+                    failed_content_ids=tracking["failed_content_ids"],
+                    has_warning=tracking["has_warning"],
+                    is_complete=tracking["is_complete"],
                 )
                 logger.info(f"Source {source_id} marked as completed after all content processed")
-    
+        
         return str(content_id)
         
     except Exception as e:

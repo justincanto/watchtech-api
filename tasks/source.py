@@ -179,7 +179,10 @@ def process_source_task(
                     source_url=source.url,
                     source_name=source.name,
                     content_total=len(content_urls),
-                    content_processed=0,
+                    success_content_ids=[],
+                    failed_content_ids=[],
+                    has_warning=False,
+                    is_complete=False,
                 )
             except Exception as e:
                 logger.warning(f"Error discovering content for source {source_id}: {e}")
@@ -216,7 +219,10 @@ def process_source_task(
             source_url=source.url,
             source_name=source.name,
             content_total=0,
-            content_processed=0,
+            success_content_ids=[],
+            failed_content_ids=[],
+            has_warning=False,
+            is_complete=True,
         )
         
         logger.info(f"Source processing completed (no content): {source_id}")
