@@ -47,28 +47,9 @@ def scrap_video(url):
     video_language = info.get('language', ENGLISH_LANGUAGE_CODE)
     published_at = datetime.fromtimestamp(info['timestamp'])
 
-    def get_caption_url(lang_code):
-        # Try manual subtitles first
-        subtitles = info.get('subtitles') or {}
-        caption_data = subtitles.get(lang_code)
-        
-        # If manual subtitles aren't available, look for auto-generated captions
-        if not caption_data:
-            auto_captions = info.get('automatic_captions') or {}
-            caption_data = auto_captions.get(lang_code)
-            
-        if caption_data:
-            for caption in caption_data:
-                if caption.get('ext') == 'json3':
-                    return caption.get('url')
-                
-            raise Exception("No json3 format subtitles available")
-        return None
-
-    # Try video's language first, then fallback to English
-    caption_url = get_caption_url(video_language)
+    caption_url = get_caption_url(video_language, info)
     if not caption_url and video_language != ENGLISH_LANGUAGE_CODE:
-        caption_url = get_caption_url(ENGLISH_LANGUAGE_CODE)
+        caption_url = get_caption_url(ENGLISH_LANGUAGE_CODE, info)
 
     if not caption_url:
         raise Exception("No subtitles or automatic captions available for this video.")
@@ -88,6 +69,26 @@ def scrap_video(url):
         "description": description, 
         "published_at": published_at
     }
+
+def get_caption_url(lang_code, info):
+    subtitles = info.get('subtitles') or {}
+    caption_data = subtitles.get(lang_code)
+    
+    if not caption_data:
+        auto_captions = info.get('automatic_captions') or {}
+        caption_data = None
+        for k, v in auto_captions.items():
+            if k.endswith('-orig'):
+                caption_data = v
+                break
+        
+    if caption_data:
+        for caption in caption_data:
+            if caption.get('ext') == 'json3':
+                return caption.get('url')
+            
+        raise Exception("No json3 format subtitles available")
+    return None
 
 def format_transcript(json_text):
     """Parses yt-dlp 'json3'-formatted subtitles into plain transcript text.    """
