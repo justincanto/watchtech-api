@@ -135,25 +135,36 @@ def process_youtube_webhook(db: Session, body: bytes) -> None:
     New video notifications are queued for background processing via Celery
     for better scalability and reliability.
     """
-    parsed = feedparser.parse(body)
-    for entry in parsed.entries:
-        video_id = getattr(entry, "yt_videoid", None)
-        video_url = f"https://www.youtube.com/watch?v={video_id}"
-        channel_id = getattr(entry, "yt_channelid", None)
+    try:
+        print(f"Processing YouTube webhook notification")
+        
+        parsed = feedparser.parse(body)
 
-        source = (
-            db.query(models.Source)
-            .filter(models.Source.type == models.SourceType.YOUTUBE)
-            .filter(models.Source.original_id == channel_id)
-            .first()
-        )
-        if not source:
-            continue
+        print(f"{len(parsed.entries)} entries found")
+        
+        for entry in parsed.entries:
+            video_id = getattr(entry, "yt_videoid", None)
+            video_url = f"https://www.youtube.com/watch?v={video_id}"
+            channel_id = getattr(entry, "yt_channelid", None)
 
-        try:
-            content_service.queue_content_processing(
-                db, source, video_url
+            print(f"Processing YouTube webhook for video {video_id} from channel {channel_id}")
+
+            source = (
+                db.query(models.Source)
+                .filter(models.Source.type == models.SourceType.YOUTUBE)
+                .filter(models.Source.original_id == channel_id)
+                .first()
             )
-        except Exception as e:
-            print(f"Error queueing content {video_url} for source {source.id}: {e}")
-            continue
+            if not source:
+                continue
+
+            try:
+                content_service.queue_content_processing(
+                    db, source, video_url
+                )
+            except Exception as e:
+                print(f"Error queueing content {video_url} for source {source.id}: {e}")
+                continue
+    except Exception as e:
+        print(f"Error processing YouTube webhook notification: {e}")
+        raise
