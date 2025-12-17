@@ -210,13 +210,13 @@ async def refresh_google_token(user: models.User) -> Optional[dict]:
     client = AsyncOAuth2Client(
         client_id=GOOGLE_CLIENT_ID,
         client_secret=GOOGLE_CLIENT_SECRET,
-        token_endpoint=GOOGLE_TOKEN_URL,
-        grant_type='refresh_token',
-        refresh_token=user.google_refresh_token
     )
     
     try:
-        new_token = await client.refresh_token(GOOGLE_TOKEN_URL)
+        new_token = await client.refresh_token(
+            GOOGLE_TOKEN_URL,
+            refresh_token=user.google_refresh_token
+        )
         return new_token
     except Exception as e:
         print(f"Error refreshing token: {e}")
