@@ -142,7 +142,7 @@ def get_youtube_channel_videos(channel_url: str, limit: int = 5) -> List[str]:
         if not entries:
             return []
 
-        video_entries = entries[0].get("entries") or []
+        video_entries = entries[0].get("entries") if entries[0]["_type"] == "playlist" else entries
         video_urls = [entry.get("url") for entry in video_entries[:limit]]
 
         return video_urls
