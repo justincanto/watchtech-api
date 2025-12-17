@@ -5,7 +5,7 @@ from db import models
 from typing import Optional, Tuple, List
 import uuid
 from fastapi import HTTPException
-from subscriptions.youtube import unsubscribe_channel
+from subscriptions.youtube import subscribe_channel, unsubscribe_channel
 from utils.redis_client import store_batch_sources_sync
 
 
@@ -99,11 +99,11 @@ def update_user_sources(db: Session, user_id: uuid.UUID, sources_data: List[dict
             models.UserSource.user_id == user_id
         ).all()
         
-        existing_source_ids = {us.source_id for us in existing_user_sources}
+        existing_user_source_ids = {us.source_id for us in existing_user_sources}
         
         new_source_ids = set()
-        sources_to_process = []  # Sources that need task dispatch (PENDING or FAILED)
-        new_source_id_strings = []  # Only new sources for progress tracking
+        sources_to_process = []
+        source_ids_to_process = []
         
         for source_data in sources_data:    
             source = get_or_create_source(
@@ -114,19 +114,22 @@ def update_user_sources(db: Session, user_id: uuid.UUID, sources_data: List[dict
             
             new_source_ids.add(source.id)
 
-            if source.id not in existing_source_ids:
+            if source.id not in existing_user_source_ids:
                 user_source = models.UserSource(
                     user_id=user_id,
                     source_id=source.id 
                 )
                 db.add(user_source)
             
-            # Check if source needs processing (PENDING or FAILED)
             if source.status in [models.SourceStatus.PENDING, models.SourceStatus.FAILED]:
                 sources_to_process.append(source)
-                new_source_id_strings.append(str(source.id))
+                source_ids_to_process.append(str(source.id))
         
-        sources_to_remove = existing_source_ids - new_source_ids
+            if source.type == models.SourceType.YOUTUBE and source.id not in existing_user_source_ids:
+                if not db.query(models.YouTubeSubscription).filter(models.YouTubeSubscription.source_id == source.id).first():
+                    subscribe_channel(db, source)
+
+        sources_to_remove = existing_user_source_ids - new_source_ids
         if sources_to_remove:
             db.query(models.UserSource).filter(
                 models.UserSource.user_id == user_id,
@@ -135,10 +138,8 @@ def update_user_sources(db: Session, user_id: uuid.UUID, sources_data: List[dict
         
         db.commit()
         
-        # Store only NEW source IDs in Redis for SSE endpoint (not already processed ones)
-        store_batch_sources_sync(batch_id, new_source_id_strings)
+        store_batch_sources_sync(batch_id, source_ids_to_process)
         
-        # Dispatch tasks for sources that need processing
         # Import here to avoid circular dependency with tasks.source
         from tasks.source import process_source_task
         for source in sources_to_process:
@@ -148,7 +149,7 @@ def update_user_sources(db: Session, user_id: uuid.UUID, sources_data: List[dict
         
         clean_up_orphan_subscriptions(db)
 
-        return batch_id, updated_sources, new_source_id_strings
+        return batch_id, updated_sources, source_ids_to_process
     
     except Exception as e: 
         print(f"Error updating user sources: {str(e)}")
