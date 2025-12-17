@@ -125,7 +125,7 @@ def update_user_sources(db: Session, user_id: uuid.UUID, sources_data: List[dict
                 sources_to_process.append(source)
                 source_ids_to_process.append(str(source.id))
         
-            if source.type == models.SourceType.YOUTUBE and source.id not in existing_user_source_ids:
+            if source.status == models.SourceStatus.COMPLETED and source.type == models.SourceType.YOUTUBE and source.id not in existing_user_source_ids:
                 if not db.query(models.YouTubeSubscription).filter(models.YouTubeSubscription.source_id == source.id).first():
                     subscribe_channel(db, source)
 

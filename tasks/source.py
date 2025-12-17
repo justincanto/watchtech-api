@@ -99,24 +99,6 @@ def process_source_task(
             logger.info(f"Source already being processed: {source_id}, status: {source.status}")
             # Don't process, let the existing task handle it
             return source_id
-
-        if source.type == SourceType.YOUTUBE:
-            try:
-                subscribe_channel(db, source)
-                logger.info(f"Subscribed to YouTube PubSub for source {source_id}")
-            except Exception as e:
-                logger.warning(f"Failed to subscribe to YouTube PubSub for source {source_id}: {e}")
-                source.status = SourceStatus.FAILED
-                source.error_message = f"Failed to subscribe to YouTube PubSub: {str(e)}"
-                db.commit()
-                publish_source_progress(
-                    source_id=source_id,
-                    status=SourceStatus.FAILED.value,
-                    progress=0.0,
-                    message=f"Failed to subscribe to YouTube PubSub: {str(e)}",
-                    source_url=source.url,
-                )
-                raise
         
         source.status = SourceStatus.FETCHING_AUTHOR
         source.error_message = None
@@ -137,7 +119,6 @@ def process_source_task(
             author_data = author_extractor(source.url)
             source.name = author_data["name"]
             source.original_id = author_data["id"]
-            db.commit()
             
             logger.info(f"Author data fetched for source {source_id}: {source.name}")
             
@@ -161,6 +142,25 @@ def process_source_task(
                 source_url=source.url,
             )
             raise
+
+        if source.type == SourceType.YOUTUBE:
+            try:
+                subscribe_channel(db, source)
+                logger.info(f"Subscribed to YouTube PubSub for source {source_id}")
+            except Exception as e:
+                logger.warning(f"Failed to subscribe to YouTube PubSub for source {source_id}: {e}")
+                source.status = SourceStatus.FAILED
+                source.error_message = f"Failed to subscribe to YouTube PubSub: {str(e)}"
+                db.commit()
+
+                publish_source_progress(
+                    source_id=source_id,
+                    status=SourceStatus.FAILED.value,
+                    progress=0.0,
+                    message=f"Failed to subscribe to YouTube PubSub: {str(e)}",
+                    source_url=source.url,
+                )
+                raise
         
         source.status = SourceStatus.INGESTING_CONTENT
         db.commit()
