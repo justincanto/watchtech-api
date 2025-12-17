@@ -1,3 +1,4 @@
+import logging
 import os
 import secrets
 from datetime import datetime, timedelta, timezone
@@ -9,6 +10,13 @@ from sqlalchemy.orm import Session
 
 from content import service as content_service
 from db import models
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(levelname)s: %(asctime)s - %(name)s - %(message)s",
+)
+logger = logging.getLogger(__name__)
 
 
 PUBSUB_HUB_URL = os.getenv("YOUTUBE_PUBSUB_HUB", "https://pubsubhubbub.appspot.com/subscribe")
@@ -136,18 +144,18 @@ def process_youtube_webhook(db: Session, body: bytes) -> None:
     for better scalability and reliability.
     """
     try:
-        print(f"Processing YouTube webhook notification")
+        logger.info("Processing YouTube webhook notification")
         
         parsed = feedparser.parse(body)
 
-        print(f"{len(parsed.entries)} entries found")
+        logger.info(f"{len(parsed.entries)} entries found")
         
         for entry in parsed.entries:
             video_id = getattr(entry, "yt_videoid", None)
             video_url = f"https://www.youtube.com/watch?v={video_id}"
             channel_id = getattr(entry, "yt_channelid", None)
 
-            print(f"Processing YouTube webhook for video {video_id} from channel {channel_id}")
+            logger.info(f"Processing YouTube webhook for video {video_id} from channel {channel_id}")
 
             source = (
                 db.query(models.Source)
@@ -163,8 +171,8 @@ def process_youtube_webhook(db: Session, body: bytes) -> None:
                     db, source, video_url
                 )
             except Exception as e:
-                print(f"Error queueing content {video_url} for source {source.id}: {e}")
+                logger.error(f"Error queueing content {video_url} for source {source.id}: {e}")
                 continue
     except Exception as e:
-        print(f"Error processing YouTube webhook notification: {e}")
+        logger.error(f"Error processing YouTube webhook notification: {e}")
         raise
