@@ -156,40 +156,6 @@ def init_source_content_tracking(
     client.delete(success_key, failed_key)
     # Create empty sets with TTL by adding and removing a dummy value
     # This ensures the keys exist for SMEMBERS calls
-    
-
-def _get_content_tracking_state(client: redis.Redis, source_id: str) -> Optional[dict]:
-    """
-    Get the current content tracking state for a source.
-    
-    Returns:
-        Dict with tracking data, success_ids, failed_ids, and computed fields,
-        or None if tracking not found.
-    """
-    tracking_key = f"source:{source_id}:content_tracking"
-    success_key = f"source:{source_id}:success_ids"
-    failed_key = f"source:{source_id}:failed_ids"
-    
-    data = client.get(tracking_key)
-    if not data:
-        return None
-    
-    tracking = json.loads(data)
-    
-    # Get sets atomically
-    success_ids = list(client.smembers(success_key))
-    failed_ids = list(client.smembers(failed_key))
-    
-    content_total = tracking["content_total"]
-    total_processed = len(success_ids) + len(failed_ids)
-    
-    tracking["success_content_ids"] = success_ids
-    tracking["failed_content_ids"] = failed_ids
-    tracking["has_warning"] = len(failed_ids) > 0
-    tracking["is_complete"] = total_processed == content_total
-    tracking["total_processed"] = total_processed
-    
-    return tracking
 
 
 def add_success_content(source_id: str, content_id: str) -> Optional[dict]:
@@ -213,34 +179,7 @@ def add_success_content(source_id: str, content_id: str) -> Optional[dict]:
     client.sadd(success_key, content_id)
     client.expire(success_key, BATCH_TTL)
     
-    tracking = _get_content_tracking_state(client, source_id)
-    if not tracking:
-        return None
-    
-    content_total = tracking["content_total"]
-    total_processed = tracking["total_processed"]
-    
-    if content_total > 0:
-        content_progress = total_processed / content_total
-        overall_progress = PROGRESS_CONTENT_START + (PROGRESS_CONTENT_END - PROGRESS_CONTENT_START) * content_progress
-    else:
-        overall_progress = PROGRESS_CONTENT_END
-    
-    publish_source_progress(
-        source_id=source_id,
-        status="ingesting_content",
-        progress=overall_progress,
-        message=f"Processed {total_processed}/{content_total} items",
-        source_url=tracking["source_url"],
-        source_name=tracking["source_name"],
-        content_total=content_total,
-        success_content_ids=tracking["success_content_ids"],
-        failed_content_ids=tracking["failed_content_ids"],
-        has_warning=tracking["has_warning"],
-        is_complete=tracking["is_complete"],
-    )
-    
-    return tracking
+    return _send_source_ingestion_tracking_update_event(client, source_id)
 
 
 def add_failed_content(source_id: str, content_id: str) -> Optional[dict]:
@@ -264,34 +203,7 @@ def add_failed_content(source_id: str, content_id: str) -> Optional[dict]:
     client.sadd(failed_key, content_id)
     client.expire(failed_key, BATCH_TTL)
     
-    tracking = _get_content_tracking_state(client, source_id)
-    if not tracking:
-        return None
-    
-    content_total = tracking["content_total"]
-    total_processed = tracking["total_processed"]
-    
-    if content_total > 0:
-        content_progress = total_processed / content_total
-        overall_progress = PROGRESS_CONTENT_START + (PROGRESS_CONTENT_END - PROGRESS_CONTENT_START) * content_progress
-    else:
-        overall_progress = PROGRESS_CONTENT_END
-    
-    publish_source_progress(
-        source_id=source_id,
-        status="ingesting_content",
-        progress=overall_progress,
-        message=f"Processed {total_processed}/{content_total} items",
-        source_url=tracking["source_url"],
-        source_name=tracking["source_name"],
-        content_total=content_total,
-        success_content_ids=tracking["success_content_ids"],
-        failed_content_ids=tracking["failed_content_ids"],
-        has_warning=tracking["has_warning"],
-        is_complete=tracking["is_complete"],
-    )
-    
-    return tracking
+    return _send_source_ingestion_tracking_update_event(client, source_id)
 
 
 def move_failed_to_success(source_id: str, content_id: str) -> Optional[dict]:
@@ -316,6 +228,24 @@ def move_failed_to_success(source_id: str, content_id: str) -> Optional[dict]:
     client.expire(success_key, BATCH_TTL)
     client.expire(failed_key, BATCH_TTL)
     
+    return _send_source_ingestion_tracking_update_event(client, source_id)
+
+
+def get_source_content_tracking(source_id: str) -> Optional[dict]:
+    """
+    Get the current content tracking state for a source.
+    
+    Args:
+        source_id: UUID of the source
+        
+    Returns:
+        Tracking data dict with success_ids, failed_ids, and computed fields,
+        or None if tracking not found
+    """
+    client = get_sync_redis_client()
+    return _get_content_tracking_state(client, source_id)
+
+def _send_source_ingestion_tracking_update_event(client: redis.Redis, source_id: str):
     tracking = _get_content_tracking_state(client, source_id)
     if not tracking:
         return None
@@ -345,17 +275,34 @@ def move_failed_to_success(source_id: str, content_id: str) -> Optional[dict]:
     
     return tracking
 
-
-def get_source_content_tracking(source_id: str) -> Optional[dict]:
+def _get_content_tracking_state(client: redis.Redis, source_id: str) -> Optional[dict]:
     """
     Get the current content tracking state for a source.
     
-    Args:
-        source_id: UUID of the source
-        
     Returns:
-        Tracking data dict with success_ids, failed_ids, and computed fields,
-        or None if tracking not found
+        Dict with tracking data, success_ids, failed_ids, and computed fields,
+        or None if tracking not found.
     """
-    client = get_sync_redis_client()
-    return _get_content_tracking_state(client, source_id)
+    tracking_key = f"source:{source_id}:content_tracking"
+    success_key = f"source:{source_id}:success_ids"
+    failed_key = f"source:{source_id}:failed_ids"
+    
+    data = client.get(tracking_key)
+    if not data:
+        return None
+    
+    tracking = json.loads(data)
+    
+    success_ids = list(client.smembers(success_key))
+    failed_ids = list(client.smembers(failed_key))
+    
+    content_total = tracking["content_total"]
+    total_processed = len(success_ids) + len(failed_ids)
+    
+    tracking["success_content_ids"] = success_ids
+    tracking["failed_content_ids"] = failed_ids
+    tracking["has_warning"] = len(failed_ids) > 0
+    tracking["is_complete"] = total_processed == content_total
+    tracking["total_processed"] = total_processed
+    
+    return tracking

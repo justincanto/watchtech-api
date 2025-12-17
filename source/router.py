@@ -120,14 +120,14 @@ async def get_source_progress(batch_id: str, db: Session = Depends(get_db)):
                 return
             
             # Listen for progress events
-            timeout_seconds = 300  # 5 minute timeout
+            timeout_seconds = 600  # 10 minute timeout
             start_time = asyncio.get_event_loop().time()
             
             async for message in pubsub.listen():
                 # Check timeout
                 elapsed = asyncio.get_event_loop().time() - start_time
                 if elapsed > timeout_seconds:
-                    yield f"event: error\ndata: {json.dumps({'message': 'Timeout waiting for progress updates'})}\n\n"
+                    yield f"event: error\ndata: {json.dumps({'message': 'Timeout waiting for progress updates', 'status': 'timeout'})}\n\n"
                     break
                 
                 if message["type"] == "message":
