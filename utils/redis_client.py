@@ -3,6 +3,7 @@ import json
 from typing import List, Optional
 from contextlib import asynccontextmanager
 
+from db.enums import SourceStatus
 import redis
 import redis.asyncio as aioredis
 
@@ -149,6 +150,7 @@ def init_source_content_tracking(
         "content_total": content_total,
         "source_url": source_url,
         "source_name": source_name,
+        "status": SourceStatus.INGESTING_CONTENT.value,
     }
     
     client.set(tracking_key, json.dumps(tracking_data), ex=BATCH_TTL)
@@ -261,7 +263,7 @@ def _send_source_ingestion_tracking_update_event(client: redis.Redis, source_id:
     
     publish_source_progress(
         source_id=source_id,
-        status="ingesting_content",
+        status=tracking["status"],
         progress=overall_progress,
         message=f"Processed {total_processed}/{content_total} items",
         source_url=tracking["source_url"],
@@ -304,5 +306,8 @@ def _get_content_tracking_state(client: redis.Redis, source_id: str) -> Optional
     tracking["has_warning"] = len(failed_ids) > 0
     tracking["is_complete"] = total_processed == content_total
     tracking["total_processed"] = total_processed
+
+    if tracking["is_complete"]:
+        tracking["status"] = SourceStatus.COMPLETED.value
     
     return tracking
