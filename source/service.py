@@ -1,4 +1,6 @@
+import json
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import set_committed_value
 from db import models
 from typing import Optional, Tuple, List
 import uuid
@@ -62,11 +64,11 @@ def get_source(db: Session, source_id: uuid.UUID, limit_contents: int = 12) -> O
             .all()
         )
         
-        # Add the contents to the source
-        # Note: This won't override the existing relationship,
-        # it just replaces the loaded contents with our limited set
-        source.contents = recent_contents
-
+        # Use set_committed_value to set the contents without marking the
+        # relationship as dirty. Direct assignment (source.contents = ...) 
+        # would cause SQLAlchemy to try to disassociate excluded contents
+        # by setting their source_id to NULL, which fails the NOT NULL constraint.
+        set_committed_value(source, 'contents', recent_contents)
     
     return source 
 
