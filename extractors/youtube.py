@@ -46,6 +46,10 @@ def scrap_video(url):
     uploader_url = info['uploader_url']
     video_language = info.get('language', ENGLISH_LANGUAGE_CODE)
     published_at = datetime.fromtimestamp(info['timestamp'])
+    media_type = info['media_type']
+
+    if media_type != 'video':
+        raise Exception("Media type is not video but: " + media_type)
 
     caption_url = get_caption_url(video_language, info)
     if not caption_url and video_language != ENGLISH_LANGUAGE_CODE:
