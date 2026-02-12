@@ -5,7 +5,6 @@ from db import models
 from typing import Optional, Tuple, List
 import uuid
 from fastapi import HTTPException
-from subscriptions.youtube import subscribe_channel, unsubscribe_channel
 from utils.redis_client import store_batch_sources_sync
 
 
@@ -125,10 +124,6 @@ def update_user_sources(db: Session, user_id: uuid.UUID, sources_data: List[dict
                 sources_to_process.append(source)
                 source_ids_to_process.append(str(source.id))
         
-            if source.status == models.SourceStatus.COMPLETED and source.type == models.SourceType.YOUTUBE and source.id not in existing_user_source_ids:
-                if not db.query(models.YouTubeSubscription).filter(models.YouTubeSubscription.source_id == source.id).first():
-                    subscribe_channel(db, source)
-
         sources_to_remove = existing_user_source_ids - new_source_ids
         if sources_to_remove:
             db.query(models.UserSource).filter(
@@ -146,8 +141,6 @@ def update_user_sources(db: Session, user_id: uuid.UUID, sources_data: List[dict
             process_source_task.delay(source_id=str(source.id))
         
         updated_sources = get_user_sources(db=db, user_id=user_id)
-        
-        clean_up_orphan_subscriptions(db)
 
         return batch_id, updated_sources, source_ids_to_process
     
@@ -155,19 +148,3 @@ def update_user_sources(db: Session, user_id: uuid.UUID, sources_data: List[dict
         print(f"Error updating user sources: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error updating user sources: {str(e)}")
 
-def clean_up_orphan_subscriptions(db: Session) -> None:
-    orphan_source_ids = (
-        db.query(models.YouTubeSubscription.source_id)
-        .join(models.Source, models.YouTubeSubscription.source_id == models.Source.id)
-        .outerjoin(models.UserSource, models.Source.id == models.UserSource.source_id)
-        .filter(models.UserSource.source_id == None)
-        .all()
-    )
-
-    orphan_source_ids = [sid for (sid,) in orphan_source_ids]
-    if orphan_source_ids:
-        for source in db.query(models.Source).filter(models.Source.id.in_(orphan_source_ids)).all():
-            try:
-                unsubscribe_channel(db, source)
-            except Exception as e:
-                print(f"Failed to unsubscribe YouTube PubSub for source {source.id}: {e}")

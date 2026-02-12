@@ -1,3 +1,1 @@
-"""Subscriptions package for external sources (e.g., YouTube PubSubHubbub)."""
-
-
+"""Subscriptions package — polls YouTube channels for new videos via yt-dlp."""

@@ -70,7 +70,6 @@ class Source(Base):
     # Relationships
     contents: Mapped[List["Content"]] = relationship("Content", back_populates="source")
     users: Mapped[List["User"]] = relationship("User", secondary="user_sources", back_populates="sources")
-    youtube_subscription: Mapped[Optional["YouTubeSubscription"]] = relationship("YouTubeSubscription", back_populates="source")
 
 class Content(Base):
     __tablename__ = "contents"
@@ -112,22 +111,3 @@ class UserSource(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
-class YouTubeSubscription(Base):
-    __tablename__ = "youtube_subscriptions"
-
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    source_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("sources.id"), nullable=False, unique=True)
-    channel_id: Mapped[str] = mapped_column(String(255), nullable=False)
-    lease_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    verify_token: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-
-    # Relationships
-    source: Mapped[Source] = relationship("Source", back_populates="youtube_subscription")
-
-    __table_args__ = (
-        UniqueConstraint('channel_id', name='uix_ytsub_channel_id'),
-        Index('idx_ytsub_lease_expires_at', 'lease_expires_at'),
-    )

@@ -8,7 +8,6 @@ from db.models import Source, SourceStatus, SourceType
 from extractors.youtube import get_channel_data, get_youtube_channel_videos
 from extractors.medium import get_author_data, get_medium_author_articles
 from extractors.dev_to import get_author_data as get_dev_to_author_data, get_dev_to_author_articles
-from subscriptions.youtube import subscribe_channel
 from content import service as content_service
 from utils.redis_client import publish_source_progress, init_source_content_tracking
 
@@ -56,8 +55,7 @@ def process_source_task(
     This task handles the full source processing pipeline:
     1. Fetch author/channel data from external API
     2. Update source with name and original_id
-    3. Subscribe to YouTube PubSub (if applicable)
-    4. Discover and ingest initial content with detailed progress
+    3. Discover and ingest initial content with detailed progress
     
     Progress breakdown:
     - 0-20%: Fetching author data
@@ -143,25 +141,6 @@ def process_source_task(
             )
             raise
 
-        if source.type == SourceType.YOUTUBE:
-            try:
-                subscribe_channel(db, source)
-                logger.info(f"Subscribed to YouTube PubSub for source {source_id}")
-            except Exception as e:
-                logger.warning(f"Failed to subscribe to YouTube PubSub for source {source_id}: {e}")
-                source.status = SourceStatus.FAILED
-                source.error_message = f"Failed to subscribe to YouTube PubSub: {str(e)}"
-                db.commit()
-
-                publish_source_progress(
-                    source_id=source_id,
-                    status=SourceStatus.FAILED.value,
-                    progress=0.0,
-                    message=f"Failed to subscribe to YouTube PubSub: {str(e)}",
-                    source_url=source.url,
-                )
-                raise
-        
         source.status = SourceStatus.INGESTING_CONTENT
         db.commit()
         

@@ -1,17 +1,13 @@
 from celery_app import celery_app
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse
 import uvicorn
 from content.router import router as content_router
 from source.router import router as source_router
 from auth.router import router as auth_router
 from db.database import Base, engine
-from subscriptions.router import router as subscriptions_router
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from sqlalchemy.orm import Session
-from db.database import SessionLocal
-from subscriptions.youtube import renew_due_subscriptions
+from subscriptions.youtube import poll_youtube_job
 import os
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 from contextlib import asynccontextmanager
@@ -23,17 +19,8 @@ Base.metadata.create_all(bind=engine)
 async def lifespan(app: FastAPI):
     scheduler = AsyncIOScheduler()
 
-    def _renew_subscriptions_job():
-        db: Session = SessionLocal()
-        try:
-            renewed = renew_due_subscriptions(db)
-            if renewed:
-                print(f"Renewed {renewed} YouTube subscriptions")
-        finally:
-            db.close()
-
-    # Run daily at 03:00 UTC
-    scheduler.add_job(_renew_subscriptions_job, "cron", hour=3, minute=0)
+    # Poll YouTube channels every 15 minutes
+    scheduler.add_job(poll_youtube_job, "interval", minutes=15)
     scheduler.start()
 
     try:
@@ -61,7 +48,7 @@ app.add_middleware(
 app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
 app.include_router(content_router, prefix="/api/content", tags=["content"])
 app.include_router(source_router, prefix="/api/source", tags=["source"])
-app.include_router(subscriptions_router, prefix="/api/webhooks", tags=["webhooks"])
+
 
 @app.get("/health")
 async def health_check():
