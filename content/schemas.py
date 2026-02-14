@@ -19,6 +19,7 @@ class Source(SourceBase):
 class Content(BaseModel):
     id: uuid.UUID
     title: str
+    description: str
     url: HttpUrl
     summary: Optional[str] = None  # May be None while processing
     source: Source
