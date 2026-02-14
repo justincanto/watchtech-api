@@ -41,33 +41,35 @@ def get_or_create_source(db: Session, type: models.SourceType, url: str) -> mode
 
     return new_source
 
-def get_source(db: Session, source_id: uuid.UUID, limit_contents: int = 12) -> Optional[models.Source]:
+def get_source(db: Session, source_id: uuid.UUID, user_id: uuid.UUID, limit_contents: int = 12) -> Optional[models.Source]:
     """
     Get a source by ID and include its most recent completed contents.
     Only returns contents that are fully processed.
     """
     source = db.query(models.Source).filter(
-        models.Source.id == source_id, 
-        models.Source.status == models.SourceStatus.COMPLETED
+        models.Source.id == source_id,
+        models.UserSource.user_id == user_id
     ).first()
     
-    if source:
-        recent_contents = (
-            db.query(models.Content)
-            .filter(
-                models.Content.source_id == source_id,
-                models.Content.status == models.ContentStatus.COMPLETED
-            )
-            .order_by(models.Content.created_at.desc())
-            .limit(limit_contents)
-            .all()
+    if source is None:
+        raise HTTPException(status_code=404, detail="Source not found or not accessible to the user")
+
+    recent_contents = (
+        db.query(models.Content)
+        .filter(
+            models.Content.source_id == source_id,
+            models.Content.status == models.ContentStatus.COMPLETED
         )
-        
-        # Use set_committed_value to set the contents without marking the
-        # relationship as dirty. Direct assignment (source.contents = ...) 
-        # would cause SQLAlchemy to try to disassociate excluded contents
-        # by setting their source_id to NULL, which fails the NOT NULL constraint.
-        set_committed_value(source, 'contents', recent_contents)
+        .order_by(models.Content.created_at.desc())
+        .limit(limit_contents)
+        .all()
+    )
+    
+    # Use set_committed_value to set the contents without marking the
+    # relationship as dirty. Direct assignment (source.contents = ...) 
+    # would cause SQLAlchemy to try to disassociate excluded contents
+    # by setting their source_id to NULL, which fails the NOT NULL constraint.
+    set_committed_value(source, 'contents', recent_contents)
     
     return source 
 

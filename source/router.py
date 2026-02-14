@@ -174,7 +174,7 @@ def get_source(
     current_user: User = Depends(get_current_user)
 ):
     """Get a specific source by ID with its 12 most recent contents"""
-    return service.get_source(db=db, source_id=source_id)
+    return service.get_source(db=db, source_id=source_id, user_id=current_user.id)
 
 @router.get("/", response_model=schemas.UserSources)
 def get_user_sources(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
