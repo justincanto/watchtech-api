@@ -93,8 +93,9 @@ def process_content_task(
         logger.info(f"Content extracted: {db_content.title}")
         
         try:
-            summary = summarize_content(content_data.get("content", ""))
-            db_content.summary = summary
+            result = summarize_content(content_data.get("content"))
+            db_content.summary = result.summary
+            db_content.description = result.description
             db_content.status = models.ContentStatus.COMPLETED
             db_content.error_message = None
             db.commit()
