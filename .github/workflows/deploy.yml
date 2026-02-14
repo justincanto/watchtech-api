@@ -16,7 +16,7 @@ jobs:
           username: ${{ secrets.VM_USERNAME }}
           key: ${{ secrets.VM_SSH_KEY }}
           # port: 22 # Default is 22, uncomment if different
-          timeout: 60s
+          timeout: 300s
           script: |
             # Navigate to the project directory
             # NOTE: Ensure this path matches where you cloned the repo on your server
