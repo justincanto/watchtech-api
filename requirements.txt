@@ -1,5 +1,5 @@
 langchain_openai
-yt-dlp
+yt-dlp==2026.02.04
 requests
 fastapi==0.115.12
 uvicorn==0.34.2
