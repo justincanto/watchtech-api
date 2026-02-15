@@ -3,6 +3,7 @@ import json
 import requests
 import feedparser
 from yt_dlp import YoutubeDL
+from yt_dlp.utils import DownloadError
 from datetime import datetime
 from typing import List
 import os
@@ -43,7 +44,15 @@ def scrap_video(url):
     ydl_opts["proxy"] = RESIDENTIAL_PROXY
     
     with YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=False)
+        try:
+            info = ydl.extract_info(url, download=False)
+        except DownloadError as e:
+            msg = str(e).lower()
+            if "live event will begin" in msg:
+                raise NonVideoContentError(
+                    "Content is an upcoming stream or premiere"
+                )
+            raise
 
     title = info['title']
     publisher = info['uploader']
