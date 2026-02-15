@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from content import service as content_service
 from db import models
-from extractors.youtube import get_youtube_channel_videos
+from extractors.youtube import get_youtube_channel_feed_videos
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +35,7 @@ def poll_youtube_channels(db: Session) -> int:
         .filter(
             models.Source.type == models.SourceType.YOUTUBE,
             models.Source.status == models.SourceStatus.COMPLETED,
-            models.Source.url.isnot(None),
+            models.Source.original_id.isnot(None),
         )
         .all()
     )
@@ -43,7 +43,7 @@ def poll_youtube_channels(db: Session) -> int:
     queued_count = 0
     for source in sources:
         try:
-            video_urls = get_youtube_channel_videos(source.url)
+            video_urls = get_youtube_channel_feed_videos(source.original_id)
             for url in video_urls:
                 try:
                     content_service.queue_content_processing(db, source, url)

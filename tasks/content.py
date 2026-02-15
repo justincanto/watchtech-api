@@ -5,7 +5,7 @@ from celery.utils.log import get_task_logger
 from celery_app import celery_app
 from db.database import SessionLocal
 from db import models
-from extractors.youtube import scrap_video
+from extractors.youtube import scrap_video, NonVideoContentError
 from extractors.medium import scrap_article
 from extractors.dev_to import scrap_article as scrap_dev_to_article
 from agents.summarizer import summarize_content
@@ -75,11 +75,17 @@ def process_content_task(
         
         try:
             content_data = extractor(url)
+        except NonVideoContentError as e:
+            db_content.status = models.ContentStatus.IGNORED
+            db_content.error_message = str(e)
+            db.commit()
+            logger.info(f"Content ignored (non-video): {url}")
+            return str(content_id)
         except Exception as e:
             db_content.status = models.ContentStatus.FAILED
             db_content.error_message = f"Extraction failed: {str(e)}"
             db.commit()
-            
+
             add_failed_content(source_id, str(content_id))
             raise
         

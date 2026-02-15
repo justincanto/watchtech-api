@@ -1,10 +1,16 @@
 import sys
 import json
 import requests
+import feedparser
 from yt_dlp import YoutubeDL
 from datetime import datetime
 from typing import List
 import os
+
+
+class NonVideoContentError(Exception):
+    """Raised when content is not a video (e.g. shorts, live streams)."""
+    pass
 
 RESIDENTIAL_PROXY = os.getenv("RESIDENTIAL_PROXY")
 if not RESIDENTIAL_PROXY:
@@ -49,7 +55,7 @@ def scrap_video(url):
     media_type = info['media_type']
 
     if media_type != 'video':
-        raise Exception("Media type is not video but: " + media_type)
+        raise NonVideoContentError("Media type is not video but: " + media_type)
 
     caption_url = get_caption_url(video_language, info)
     if not caption_url and video_language != ENGLISH_LANGUAGE_CODE:
@@ -153,3 +159,33 @@ def get_youtube_channel_videos(channel_url: str, limit: int = 5) -> List[str]:
     except Exception as e:
         print(f"Error retrieving YouTube videos: {e}")
         return []
+
+
+def get_youtube_channel_feed_videos(channel_id: str) -> List[str]:
+    """
+    Get recent video URLs from a YouTube channel's public XML feed.
+
+    Uses the free Atom feed (no proxy or API key needed) and filters out
+    Shorts by checking each entry's link for '/shorts/'.
+
+    Args:
+        channel_id: The YouTube channel ID (e.g. UC...)
+
+    Returns:
+        List of video URLs (https://www.youtube.com/watch?v=...)
+    """
+    feed_url = f"https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
+    feed = feedparser.parse(feed_url)
+
+    video_urls = []
+    for entry in feed.entries:
+        # Each entry has a list of links; check if any point to /shorts/
+        is_short = any("/shorts/" in link.get("href", "") for link in entry.get("links", []))
+        if is_short:
+            continue
+
+        video_id = entry.get("yt_videoid")
+        if video_id:
+            video_urls.append(f"https://www.youtube.com/watch?v={video_id}")
+
+    return video_urls[:5]

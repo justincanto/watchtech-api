@@ -29,4 +29,5 @@ class ContentStatus(enum.Enum):
     SUMMARIZING = "summarizing"  # Generating AI summary
     COMPLETED = "completed"  # Processing finished successfully
     FAILED = "failed"        # Processing failed
+    IGNORED = "ignored"      # Content intentionally skipped (e.g. non-video)
 

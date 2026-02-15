@@ -20,7 +20,7 @@ async def lifespan(app: FastAPI):
     scheduler = AsyncIOScheduler()
 
     # Poll YouTube channels every 15 minutes
-    scheduler.add_job(poll_youtube_job, "interval", hours=2)
+    scheduler.add_job(poll_youtube_job, "interval", minutes=15)
     scheduler.start()
 
     try:
