@@ -8,7 +8,7 @@ class SummaryResult(BaseModel):
     summary: str = Field(description="Detailed markdown summary")
     description: str = Field(description="A concise 2-line description")
 
-SUMMARY_PROMPT = """You're a tech watch expert who excels at the task of summarizing contents to extract and condense the most value out of them.
+SUMMARY_PROMPT = """You're an agent that excels at the task of summarizing contents to extract and condense the most value out of them.
 You will be provided with a video transcript or a written article and your job will be to extract all the important and valuable information from it in a summary which will bring as much value and detail as the initial content.
 Don't simplify things, keep the same level of technical details as the original content especially the technical words, be factual and precise, following the original content style.
 Skip the part that doesn't provide valuable information like greeting and sponsorship segments.
