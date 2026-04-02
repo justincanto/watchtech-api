@@ -13,6 +13,16 @@ class SourceBase(BaseModel):
     url: HttpUrl
     name: Optional[str] = None
 
+class SourceSummary(SourceBase):
+    """Schema for source list responses, without contents"""
+    id: uuid.UUID
+    original_id: Optional[str] = None
+    status: SourceStatus = SourceStatus.COMPLETED
+    error_message: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
 class Source(SourceBase):
     """Schema for source responses, including ID and a list of contents"""
     id: uuid.UUID
@@ -20,9 +30,9 @@ class Source(SourceBase):
     status: SourceStatus = SourceStatus.COMPLETED
     error_message: Optional[str] = None
     contents: Optional[List[Content]] = []
-    
+
     class Config:
-        from_attributes = True 
+        from_attributes = True
 
 class SourceCreate(BaseModel):
     type: SourceType
@@ -33,7 +43,7 @@ class UserSourcesUpdate(BaseModel):
     sources: List[SourceCreate]
 
 class UserSources(BaseModel):
-    sources: List[Source]
+    sources: List[SourceSummary]
     
     class Config:
         from_attributes = True
