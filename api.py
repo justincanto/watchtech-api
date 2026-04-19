@@ -39,7 +39,7 @@ app = FastAPI(
 app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[os.getenv("FRONTEND_URL", "https://watchtech.io")],
+    allow_origins=[os.getenv("FRONTEND_URL", "https://watchtech.tech")],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

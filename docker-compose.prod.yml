@@ -32,12 +32,12 @@ services:
     labels:
       - "traefik.enable=true"
       # Routing
-      - "traefik.http.routers.watchtech.rule=Host(`api.watchtech.io`)"
+      - "traefik.http.routers.watchtech.rule=Host(`api.watchtech.tech`)"
       - "traefik.http.routers.watchtech.entrypoints=websecure"
       - "traefik.http.routers.watchtech.tls.certresolver=le"
       - "traefik.http.services.watchtech.loadbalancer.server.port=8000"
       # Redirect HTTP -> HTTPS
-      - "traefik.http.routers.watchtech-http.rule=Host(`api.watchtech.io`)"
+      - "traefik.http.routers.watchtech-http.rule=Host(`api.watchtech.tech`)"
       - "traefik.http.routers.watchtech-http.entrypoints=web"
       - "traefik.http.routers.watchtech-http.middlewares=redirect-to-https"
       - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
